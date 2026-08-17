@@ -6,11 +6,38 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Vite's default 5173 falls inside a range Windows reserves for Hyper-V/WSL
+    // (check with: netsh interface ipv4 show excludedportrange protocol=tcp),
+    // which makes the dev server fail to bind with EACCES. 5500 sits outside
+    // every reserved range. strictPort surfaces a conflict instead of silently
+    // moving to another port, which would break the OIDC redirect_uri.
+    port: 5500,
+    strictPort: true,
     proxy: {
       // Catch any request starting with /api
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
+        secure: false,
+      },
+      // OIDC login endpoints. Unlike /api these deliberately keep changeOrigin off:
+      // Spring builds the redirect_uri from the incoming Host header, so rewriting it
+      // to localhost:8080 would send the browser back to the backend port after login
+      // instead of to the dev server. Leaving the Host as localhost:5173 keeps the
+      // whole round trip on the dev server.
+      '/oauth2': {
+        target: 'http://localhost:8080',
+        changeOrigin: false,
+        secure: false,
+      },
+      '/login': {
+        target: 'http://localhost:8080',
+        changeOrigin: false,
+        secure: false,
+      },
+      '/logout': {
+        target: 'http://localhost:8080',
+        changeOrigin: false,
         secure: false,
       }
     }

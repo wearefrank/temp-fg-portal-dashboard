@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { client } from '../api/client';
+import { apiFetch } from '../api/auth';
 
 const GITHUB_STORAGE_KEY = 'github-settings';
 const GITLAB_STORAGE_KEY = 'gitlab-settings';
@@ -172,7 +173,7 @@ export function useVersionHistory(filePath: string): UseVersionHistory {
     // loads the current HEAD file directly from the repo (not a specific commit)
     const loadFileContent = async (filePathOverride?: string): Promise<string> => {
         const resolvedPath = filePathOverride !== undefined ? filePathOverride : filePath;
-        const response = await fetch('/api/versions/file', { headers: getProviderHeaders(resolvedPath) });
+        const response = await apiFetch('/api/versions/file', { headers: getProviderHeaders(resolvedPath) });
         if (!response.ok) {
             const text = await response.text();
             throw new Error(text || `HTTP ${response.status}`);

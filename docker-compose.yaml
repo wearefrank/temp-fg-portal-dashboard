@@ -26,6 +26,33 @@ services:
     ports:
       - "9090:9090"
 
+  # Test identity provider - start with: docker compose --profile keycloak up
+  # Admin console: http://localhost:8081  (admin / admin)
+  # Realm "frank" is imported on every start; changes made in the UI are lost on
+  # recreate because dev mode keeps everything in an in-memory database.
+  #
+  # Reachable under one identity from both sides:
+  #   - from your browser  : http://localhost:8081/realms/frank/...
+  #   - from apisix/console: http://keycloak:8080/realms/frank/...
+  # KC_HOSTNAME pins the issuer to the localhost form so browser redirects work,
+  # while BACKCHANNEL_DYNAMIC lets in-network callers keep using keycloak:8080.
+  # Without both, a token minted on one side fails validation on the other.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7
+    restart: always
+    profiles: [keycloak]
+    command: ["start-dev", "--import-realm"]
+    configs:
+      - source: keycloak_realm
+        target: /opt/keycloak/data/import/frank-realm.json
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=admin
+      - KC_HOSTNAME=http://localhost:8081
+      - KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true
+    ports:
+      - "8081:8080"
+
   # FederatedGateWay management UI - start with: docker compose --profile ui up
   console:
     image: ghcr.io/wearefrank/federated-gateway-console:latest
@@ -173,6 +200,72 @@ configs:
         role: data_plane
         role_data_plane:
           config_provider: yaml
+  keycloak_realm:
+    content: |
+      {
+        "realm": "frank",
+        "enabled": true,
+        "sslRequired": "none",
+        "accessTokenLifespan": 3600,
+        "roles": {
+          "realm": [
+            { "name": "gateway-user", "description": "Plain authenticated user" },
+            { "name": "gateway-admin", "description": "Elevated user, for testing role-based rules" }
+          ]
+        },
+        "clients": [
+          {
+            "clientId": "frank-confidential",
+            "name": "Confidential client (has a secret)",
+            "enabled": true,
+            "protocol": "openid-connect",
+            "publicClient": false,
+            "secret": "frank-confidential-secret",
+            "standardFlowEnabled": true,
+            "directAccessGrantsEnabled": true,
+            "serviceAccountsEnabled": true,
+            "redirectUris": ["*"],
+            "webOrigins": ["*"]
+          },
+          {
+            "clientId": "frank-public",
+            "name": "Public client (browser / SPA)",
+            "enabled": true,
+            "protocol": "openid-connect",
+            "publicClient": true,
+            "standardFlowEnabled": true,
+            "directAccessGrantsEnabled": true,
+            "redirectUris": ["*"],
+            "webOrigins": ["*"]
+          }
+        ],
+        "users": [
+          {
+            "username": "testuser",
+            "email": "testuser@example.com",
+            "firstName": "Test",
+            "lastName": "User",
+            "enabled": true,
+            "emailVerified": true,
+            "credentials": [
+              { "type": "password", "value": "password", "temporary": false }
+            ],
+            "realmRoles": ["gateway-user"]
+          },
+          {
+            "username": "testadmin",
+            "email": "testadmin@example.com",
+            "firstName": "Test",
+            "lastName": "Admin",
+            "enabled": true,
+            "emailVerified": true,
+            "credentials": [
+              { "type": "password", "value": "password", "temporary": false }
+            ],
+            "realmRoles": ["gateway-user", "gateway-admin"]
+          }
+        ]
+      }
   prometheus_config:
     content: |
       global:

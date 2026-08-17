@@ -3,6 +3,7 @@ import { NavLink, Link } from 'react-router-dom';
 import { ThemeToggle } from '../ThemeToggle/ThemeToggle';
 import { useConfigManager } from '../../hooks/useConfigManager';
 import { client } from '../../api/client';
+import { logout } from '../../api/auth';
 import styles from './Header.module.css';
 
 type Status = 'ok' | 'error' | 'checking';
@@ -88,6 +89,7 @@ export const Header: React.FC = () => {
             {isChecking ? 'Checking...' : 'Retry'}
           </button>
           <ThemeToggle />
+          <button onClick={logout}>Log out</button>
         </div>
       </div>
     </header>
