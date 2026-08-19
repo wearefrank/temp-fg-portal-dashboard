@@ -4,14 +4,124 @@
     z-index: 100;
     background-color: var(--bg-color);
     border-bottom: 1px solid var(--border-dim);
+
+    /* One source of truth: the corner's own width and offset, and the space the row
+       below has to keep free for it. Changing either half alone causes an overlap. */
+    --corner-width: 180px;
+    --corner-inset: 16px;
+    --corner-space: calc(var(--corner-width) + var(--corner-inset) + 12px);
 }
 
-.headerInner {
+/* Pinned to the window edge, so it escapes the centered container width. */
+.userCorner {
+    position: absolute;
+    top: 50%;
+    right: var(--corner-inset);
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    max-width: var(--corner-width);
+}
+
+.userSummary {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    /* Capped so a long name or role list truncates instead of growing the header. */
+    max-width: var(--corner-width);
+    line-height: 1.25;
+    cursor: default;
+    outline: none;
+}
+
+.userName,
+.userRole {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.userName {
+    font-size: 0.7rem;
+    color: var(--text-primary);
+}
+
+.userRole {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+}
+
+/* Fold-out with the full roles and groups, which are too long to show inline. */
+.userDetails {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 180px;
+    padding: 8px 10px;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    box-shadow: var(--shadow-sm);
+    font-size: 0.7rem;
+    color: var(--text-primary);
+    text-align: left;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.12s ease;
+}
+
+/* focus-within also covers keyboard users tabbing onto the summary. */
+.userSummary:hover .userDetails,
+.userSummary:focus-within .userDetails {
+    opacity: 1;
+    visibility: visible;
+}
+
+.detailRow {
+    display: flex;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.detailRow + .detailRow {
+    margin-top: 4px;
+}
+
+.detailLabel {
+    min-width: 44px;
+    color: var(--text-secondary);
+}
+
+.logoutButton {
+    padding: 1px 8px;
+    font-size: 0.7rem;
+    line-height: 1.4;
+}
+
+/* Scoped to .appHeader so it outranks the global .container padding regardless of
+   which stylesheet the bundler emits first. */
+.appHeader .headerInner {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     padding: 12px 20px;
+    /* Keeps the row clear of the pinned corner, which is taken out of the flow. */
+    padding-right: var(--corner-space);
+}
+
+/* Too little width left to keep both; the role line is in the fold-out anyway. */
+@media (max-width: 900px) {
+    .appHeader {
+        --corner-width: 110px;
+    }
+
+    .userRole {
+        display: none;
+    }
 }
 
 .brand {
