@@ -127,7 +127,7 @@ export const Dashboard: React.FC = () => {
 
     useEffect(() => {
         if (!connectionConfigFetch.data) return;
-        client<boolean>('/config/check?api=control', { method: 'POST', body: connectionConfigFetch.data })
+        client<boolean>('/config/check?api=control', { method: 'GET' })
             .then(ok => setControlStatus(ok ? 'online' : 'offline'))
             .catch(() => setControlStatus('offline'));
     }, [connectionConfigFetch.data]);
