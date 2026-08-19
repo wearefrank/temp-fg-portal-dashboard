@@ -4,12 +4,37 @@ import type * as MonacoType from 'monaco-editor';
 import { format } from 'prettier/standalone';
 import * as yamlPlugin from 'prettier/plugins/yaml';
 import * as estreePlugin from 'prettier/plugins/estree';
+import { parseDocument } from 'yaml';
 import type { ApisixConfig, SchemaCatalog } from '../../../../actions/SchemaValidation';
 import { CATEGORY_LABEL, CATEGORY_COLOR } from '../../../../config/categoryDefinitions';
 import { getDisplayId } from '../../actions/checkReferences';
 import type { ParsedDoc } from '../../yamlLineUtils';
 import { YamlCompletionProvider } from './YamlCompletionProvider';
 import { ProviderContext } from './ProviderContext';
+
+/**
+ * Formats with prettier, falling back to a yaml round-trip for documents prettier's
+ * parser rejects. Returns null when the document cannot be formatted at all.
+ */
+async function formatYaml(text: string): Promise<string | null> {
+    try {
+        return await format(text, {
+            parser: 'yaml',
+            plugins: [yamlPlugin, estreePlugin],
+            tabWidth: 2,
+        });
+    } catch (err) {
+        console.warn('[yamlEditor] prettier could not format the document, falling back to yaml', err);
+    }
+
+    const doc = parseDocument(text);
+    if (doc.errors.length > 0) {
+        console.warn('[yamlEditor] document has YAML errors, not formatting:', doc.errors[0].message);
+        return null;
+    }
+    // lineWidth 0 disables folding, which would otherwise wrap long URIs and regexes
+    return doc.toString({ indent: 2, lineWidth: 0 });
+}
 
 /**
  * Manages the completion, definition, and hover language provider registrations.
@@ -96,23 +121,14 @@ export function useEditorProviders(
             },
         });
 
-        // Format Document: monaco-yaml's own formatter needs its worker, which never connects
-        // in this app's Vite setup (see monacoThemes.ts) - run prettier on the main thread instead.
+        // Format Document: monaco-yaml's own formatter is disabled (see monacoThemes.ts) so
+        // prettier is the single source of truth for formatting.
         formattingProviderRef.current = monaco.languages.registerDocumentFormattingEditProvider('yaml', {
             displayName: 'yaml',
             async provideDocumentFormattingEdits(model: MonacoType.editor.ITextModel) {
                 const text = model.getValue();
-                let formatted: string;
-                try {
-                    formatted = await format(text, {
-                        parser: 'yaml',
-                        plugins: [yamlPlugin, estreePlugin],
-                        tabWidth: 2,
-                    });
-                } catch {
-                    return [];
-                }
-                if (formatted === text) return [];
+                const formatted = await formatYaml(text);
+                if (formatted === null || formatted === text) return [];
                 return [{ range: model.getFullModelRange(), text: formatted }];
             },
         });
