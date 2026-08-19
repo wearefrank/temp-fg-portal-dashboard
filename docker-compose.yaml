@@ -8,7 +8,6 @@ services:
       - source: apisix_config
         target: /usr/local/apisix/conf/config.yaml
     ports:
-      - "9180:9180"   # Admin API
       - "9880:9080"   # HTTP proxy
       - "9881:9091"   # Prometheus metrics
       - "9882:9092"   # Control API (/v1/schema)
@@ -63,6 +62,11 @@ services:
     environment:
       - PROMETHEUS_URL=http://host.docker.internal:9090
       - APISIX_HOST=http://host.docker.internal
+      # The keycloak profile above pins its issuer to localhost:8081, which this
+      # container cannot reach, so override these to run the console in compose.
+      - KEYCLOAK_ISSUER_URI=${KEYCLOAK_ISSUER_URI:-http://localhost:8081/realms/frank}
+      - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-frank-confidential}
+      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:-frank-confidential-secret}
     volumes:
       - backend_data:/data
     depends_on:
@@ -71,8 +75,16 @@ services:
 configs:
   apisix_routes:
     content: |
-      routes: []
-      #END
+      routes:
+        - id: metrics-test
+          uri: /-/healthy
+          upstream:
+            type: roundrobin
+            nodes:
+              "prometheus:9090": 1
+          plugins:
+            prometheus: {}
+        #END
   apisix_config:
     content: |
       apisix:
@@ -241,14 +253,14 @@ configs:
         ],
         "users": [
           {
-            "username": "testuser",
-            "email": "testuser@example.com",
+            "username": "admin",
+            "email": "admin@example.com",
             "firstName": "Test",
             "lastName": "User",
             "enabled": true,
             "emailVerified": true,
             "credentials": [
-              { "type": "password", "value": "password", "temporary": false }
+              { "type": "password", "value": "admin", "temporary": false }
             ],
             "realmRoles": ["gateway-user"]
           },

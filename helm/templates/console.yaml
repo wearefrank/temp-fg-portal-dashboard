@@ -1,3 +1,13 @@
+{{- if not .Values.console.keycloak.existingSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-console-oidc
+type: Opaque
+stringData:
+  client-secret: {{ required "set console.keycloak.clientSecret or console.keycloak.existingSecret" .Values.console.keycloak.clientSecret | quote }}
+---
+{{- end }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -35,6 +45,17 @@ spec:
               value: "9092"
             - name: APISIX_METRICS_PORT
               value: "9091"
+            - name: KEYCLOAK_ISSUER_URI
+              value: {{ required "console.keycloak.issuerUri is required" .Values.console.keycloak.issuerUri | quote }}
+            - name: KEYCLOAK_CLIENT_ID
+              value: {{ .Values.console.keycloak.clientId | quote }}
+            - name: KEYCLOAK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.console.keycloak.existingSecret | default (printf "%s-console-oidc" .Release.Name) }}
+                  key: client-secret
+            - name: FORWARD_HEADERS_STRATEGY
+              value: {{ .Values.console.forwardHeadersStrategy | quote }}
           ports:
             - containerPort: 8080
           volumeMounts:
