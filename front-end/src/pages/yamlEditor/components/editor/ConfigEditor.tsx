@@ -260,7 +260,7 @@ export const ConfigEditor = ({
                 Parsed Configuration
                 {statusClass && <span className={statusClass}>{statusLabel}</span>}
                 <span className="text-small text-muted" style={{ marginLeft: 'auto' }}>
-                    Ctrl+Space for suggestions
+                    Ctrl+Space for autocomplete
                 </span>
                 <button
                     className={`text-small ${styles.btnIcon} ${styles.settingsToggle}`}
