@@ -3,6 +3,7 @@ package wearefrank.backend.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
@@ -20,6 +21,7 @@ public class AppConfig {
     }
 
     @Bean
+    @Primary
     public HttpClient httpClient() {
         try {
             // trust all TLS certificates so the app can talk to APISIX instances that use self-signed certs
@@ -43,5 +45,19 @@ public class AppConfig {
         } catch (Exception e) {
             throw new RuntimeException("Failed to create HttpClient", e);
         }
+    }
+
+    /**
+     * Separate client for Keycloak, on purpose: these requests carry the user's access
+     * token and come back with a git token, so they must not go over the trust-all
+     * SSLContext above.
+     */
+    @Bean
+    public HttpClient keycloakHttpClient() {
+        return HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(10))
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .build();
     }
 }

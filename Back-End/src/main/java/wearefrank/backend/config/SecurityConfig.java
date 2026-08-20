@@ -6,8 +6,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientProviderBuilder;
 import org.springframework.security.oauth2.client.oidc.web.logout.OidcClientInitiatedLogoutSuccessHandler;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizedClientManager;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
@@ -52,5 +56,25 @@ public class SecurityConfig {
                 .logout(logout -> logout.logoutSuccessHandler(logoutSuccessHandler));
 
         return http.build();
+    }
+
+    /**
+     * Lets the app reuse the login's access token for its own calls to Keycloak, and
+     * refresh it when it expires. oauth2Login by itself never refreshes, and the realm's
+     * access tokens live an hour - shorter than a working session, so without this the
+     * broker-token lookups would start failing mid-session.
+     */
+    @Bean
+    OAuth2AuthorizedClientManager authorizedClientManager(
+            ClientRegistrationRepository clientRegistrations,
+            OAuth2AuthorizedClientRepository authorizedClients) {
+
+        DefaultOAuth2AuthorizedClientManager manager =
+                new DefaultOAuth2AuthorizedClientManager(clientRegistrations, authorizedClients);
+        manager.setAuthorizedClientProvider(OAuth2AuthorizedClientProviderBuilder.builder()
+                .authorizationCode()
+                .refreshToken()
+                .build());
+        return manager;
     }
 }

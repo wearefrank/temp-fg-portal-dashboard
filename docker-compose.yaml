@@ -36,6 +36,21 @@ services:
   # KC_HOSTNAME pins the issuer to the localhost form so browser redirects work,
   # while BACKCHANNEL_DYNAMIC lets in-network callers keep using keycloak:8080.
   # Without both, a token minted on one side fails validation on the other.
+  #
+  # The realm also brokers GitHub and GitLab so the console can read a user's git
+  # token from Keycloak instead of asking for a personal access token. Set these in
+  # .env, otherwise both providers import disabled-in-practice with "unset" creds:
+  #   GITHUB_IDP_CLIENT_ID / GITHUB_IDP_CLIENT_SECRET
+  #   GITLAB_IDP_CLIENT_ID / GITLAB_IDP_CLIENT_SECRET
+  # The OAuth app's callback URL must be
+  #   http://localhost:8081/realms/frank/broker/{github,gitlab}/endpoint
+  # Both test users get their roles spelled out. Keycloak skips the default-roles composite
+  # for imported users that list realmRoles, so without this they hold neither
+  # account.manage-account (which the linking endpoint requires) nor broker.read-token
+  # (which reading the stored token requires). addReadTokenRoleOnCreate does not cover the
+  # latter either: it only fires when logging IN through the provider creates the account,
+  # not when an existing account links to one.
+  # Links live in the in-memory database, so recreating this container means re-linking.
   keycloak:
     image: quay.io/keycloak/keycloak:26.7
     restart: always
@@ -225,6 +240,45 @@ configs:
             { "name": "gateway-admin", "description": "Elevated user, for testing role-based rules" }
           ]
         },
+        "groups": [
+          { "name": "gateway-operators" },
+          { "name": "platform-team" }
+        ],
+        "identityProviders": [
+          {
+            "alias": "github",
+            "providerId": "github",
+            "enabled": true,
+            "trustEmail": true,
+            "storeToken": true,
+            "addReadTokenRoleOnCreate": true,
+            "linkOnly": true,
+            "hideOnLogin": true,
+            "config": {
+              "clientId": "${GITHUB_IDP_CLIENT_ID:-unset}",
+              "clientSecret": "${GITHUB_IDP_CLIENT_SECRET:-unset}",
+              "defaultScope": "read:user user:email repo",
+              "githubJsonFormat": "true",
+              "syncMode": "IMPORT"
+            }
+          },
+          {
+            "alias": "gitlab",
+            "providerId": "gitlab",
+            "enabled": true,
+            "trustEmail": true,
+            "storeToken": true,
+            "addReadTokenRoleOnCreate": true,
+            "linkOnly": true,
+            "hideOnLogin": true,
+            "config": {
+              "clientId": "${GITLAB_IDP_CLIENT_ID:-unset}",
+              "clientSecret": "${GITLAB_IDP_CLIENT_SECRET:-unset}",
+              "defaultScope": "openid read_user api",
+              "syncMode": "IMPORT"
+            }
+          }
+        ],
         "clients": [
           {
             "clientId": "frank-confidential",
@@ -236,8 +290,35 @@ configs:
             "standardFlowEnabled": true,
             "directAccessGrantsEnabled": true,
             "serviceAccountsEnabled": true,
-            "redirectUris": ["*"],
-            "webOrigins": ["*"]
+            "redirectUris": ["http://localhost:5500/*", "http://localhost:8080/*"],
+            "webOrigins": ["http://localhost:5500", "http://localhost:8080"],
+            "protocolMappers": [
+              {
+                "name": "realm roles",
+                "protocol": "openid-connect",
+                "protocolMapper": "oidc-usermodel-realm-role-mapper",
+                "config": {
+                  "claim.name": "realm_access.roles",
+                  "jsonType.label": "String",
+                  "multivalued": "true",
+                  "id.token.claim": "true",
+                  "access.token.claim": "true",
+                  "userinfo.token.claim": "true"
+                }
+              },
+              {
+                "name": "groups",
+                "protocol": "openid-connect",
+                "protocolMapper": "oidc-group-membership-mapper",
+                "config": {
+                  "claim.name": "groups",
+                  "full.path": "false",
+                  "id.token.claim": "true",
+                  "access.token.claim": "true",
+                  "userinfo.token.claim": "true"
+                }
+              }
+            ]
           },
           {
             "clientId": "frank-public",
@@ -253,28 +334,32 @@ configs:
         ],
         "users": [
           {
-            "username": "admin",
+            "username": "user",
             "email": "admin@example.com",
             "firstName": "Test",
             "lastName": "User",
             "enabled": true,
             "emailVerified": true,
             "credentials": [
-              { "type": "password", "value": "admin", "temporary": false }
+              { "type": "password", "value": "user", "temporary": false }
             ],
-            "realmRoles": ["gateway-user"]
+            "realmRoles": ["gateway-user"],
+            "clientRoles": { "broker": ["read-token"], "account": ["view-profile", "manage-account"] },
+            "groups": ["/gateway-operators"]
           },
           {
-            "username": "testadmin",
+            "username": "admin",
             "email": "testadmin@example.com",
             "firstName": "Test",
             "lastName": "Admin",
             "enabled": true,
             "emailVerified": true,
             "credentials": [
-              { "type": "password", "value": "password", "temporary": false }
+              { "type": "password", "value": "admin", "temporary": false }
             ],
-            "realmRoles": ["gateway-user", "gateway-admin"]
+            "realmRoles": ["gateway-user", "gateway-admin"],
+            "clientRoles": { "broker": ["read-token"], "account": ["view-profile", "manage-account"] },
+            "groups": ["/platform-team"]
           }
         ]
       }

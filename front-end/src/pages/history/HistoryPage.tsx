@@ -9,53 +9,35 @@ import {
     type GitlabSettings,
     type GiteaSettings,
     type CompareSide,
-    migrateGithubSettings,
-    migrateGitlabSettings,
-    migrateGiteaSettings,
 } from './types';
+import {
+    GITHUB_STORAGE_KEY,
+    GITLAB_STORAGE_KEY,
+    GITEA_STORAGE_KEY,
+    PROVIDER_STORAGE_KEY,
+    loadGithubSettings,
+    loadGitlabSettings,
+    loadGiteaSettings,
+    loadProvider,
+    type GitProvider,
+} from './gitSettingsStorage';
+import { fetchGitIdentities, startGitLink, type GitIdentityMap } from '../../api/gitIdentity';
 import styles from './HistoryPage.module.css';
 
 // sentinel value used in place of a real commit sha to represent the in-memory (unsaved) state
 const CURRENT_VERSION = '__current__';
-const GITHUB_STORAGE_KEY = 'github-settings';
-const GITLAB_STORAGE_KEY = 'gitlab-settings';
-const GITEA_STORAGE_KEY = 'gitea-settings';
-const PROVIDER_STORAGE_KEY = 'git-provider';
 
-function loadGithubSettings(): GithubSettings {
-    try {
-        const stored = localStorage.getItem(GITHUB_STORAGE_KEY);
-        if (stored) return migrateGithubSettings(JSON.parse(stored));
-    } catch {
-        // ignore parse errors
-    }
-    return { githubToken: '', githubRepo: '', githubBranch: '', profiles: [] };
-}
+// Codes Keycloak puts on the callback URL when linking fails, which read as jargon on their own.
+const LINK_ERRORS: Record<string, string> = {
+    not_logged_in: 'Your Keycloak session is no longer valid. Log out and back in, then try again.',
+    not_allowed: 'Keycloak refused the link: your account is missing the "manage-account" role.',
+    unexpected: 'That link attempt could not be verified. Please try again.',
+    identity_provider_not_found: 'This provider is not configured in Keycloak.',
+    unknown_identity_provider: 'This provider is not configured in Keycloak.',
+};
 
-function loadGitlabSettings(): GitlabSettings {
-    try {
-        const stored = localStorage.getItem(GITLAB_STORAGE_KEY);
-        if (stored) return migrateGitlabSettings(JSON.parse(stored));
-    } catch {
-        // ignore parse errors
-    }
-    return { gitlabToken: '', gitlabHost: '', gitlabProject: '', gitlabBranch: '', profiles: [] };
-}
-
-function loadGiteaSettings(): GiteaSettings {
-    try {
-        const stored = localStorage.getItem(GITEA_STORAGE_KEY);
-        if (stored) return migrateGiteaSettings(JSON.parse(stored));
-    } catch {
-        // ignore parse errors
-    }
-    return { giteaToken: '', giteaHost: '', giteaRepo: '', giteaBranch: '', profiles: [] };
-}
-
-function loadProvider(): 'github' | 'gitlab' | 'gitea' {
-    const stored = localStorage.getItem(PROVIDER_STORAGE_KEY);
-    if (stored === 'gitlab' || stored === 'gitea') return stored;
-    return 'github';
+function linkErrorMessage(code: string): string {
+    return LINK_ERRORS[code] ?? `Linking failed: ${code}`;
 }
 
 function getActiveProfiles(
@@ -126,6 +108,12 @@ export const HistoryPage: React.FC = () => {
     // Settings panel
     const [settingsOpen, setSettingsOpen] = useState(false);
 
+    // Keycloak account links; empty until the first fetch, which treats any failure as
+    // "nothing is brokered" so the personal-access-token fields stay usable.
+    const [identities, setIdentities] = useState<GitIdentityMap>({});
+    const [linkError, setLinkError] = useState<string | null>(null);
+    const [linking, setLinking] = useState<GitProvider | null>(null);
+
     // History toolbar
     const [saveFormOpen, setSaveFormOpen] = useState(false);
     const [saveMessage, setSaveMessage] = useState('');
@@ -172,6 +160,27 @@ export const HistoryPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // --- Keycloak account links ---
+
+    const refreshIdentities = () => fetchGitIdentities().then(setIdentities);
+
+    // Runs before the first version fetch so a linked provider never sends a stale token.
+    useEffect(() => {
+        refreshIdentities();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const linkAccount = async (target: GitProvider) => {
+        setLinkError(null);
+        setLinking(target);
+        try {
+            await startGitLink(target); // navigates away on success
+        } catch (err) {
+            setLinkError(err instanceof Error ? err.message : 'Could not start the link');
+            setLinking(null);
+        }
+    };
+
     // --- Settings handlers ---
 
     const openSettings = () => {
@@ -181,7 +190,25 @@ export const HistoryPage: React.FC = () => {
         setProviderDraft(provider);
         setSettingsOpen(true);
         checkAllProfiles(provider, githubSettings, gitlabSettings, giteaSettings);
+        refreshIdentities();
     };
+
+    // Landing spot for the link callback, which redirects back here with ?settings=1.
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (!params.has('settings')) return;
+
+        const failed = params.get('linkError');
+        setLinkError(failed ? linkErrorMessage(failed) : null);
+        openSettings();
+
+        // After openSettings, which resets the draft provider to the saved one.
+        const linked = params.get('linked');
+        if (linked === 'github' || linked === 'gitlab') setProviderDraft(linked);
+
+        window.history.replaceState({}, '', window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const cancelSettings = () => {
         setGithubDraft(githubSettings);
@@ -198,12 +225,17 @@ export const HistoryPage: React.FC = () => {
             || (providerDraft === 'gitlab' && hasGitlabRepoChanged(gitlabDraft, gitlabSettings))
             || (providerDraft === 'gitea' && hasGiteaRepoChanged(giteaDraft, giteaSettings));
 
+        // A linked provider gets its token from Keycloak, so drop any token still sitting
+        // in the browser rather than writing it back.
+        const github = identities.github?.linked ? { ...githubDraft, githubToken: '' } : githubDraft;
+        const gitlab = identities.gitlab?.linked ? { ...gitlabDraft, gitlabToken: '' } : gitlabDraft;
+
         setProvider(providerDraft);
-        setGithubSettings(githubDraft);
-        setGitlabSettings(gitlabDraft);
+        setGithubSettings(github);
+        setGitlabSettings(gitlab);
         setGiteaSettings(giteaDraft);
-        localStorage.setItem(GITHUB_STORAGE_KEY, JSON.stringify(githubDraft));
-        localStorage.setItem(GITLAB_STORAGE_KEY, JSON.stringify(gitlabDraft));
+        localStorage.setItem(GITHUB_STORAGE_KEY, JSON.stringify(github));
+        localStorage.setItem(GITLAB_STORAGE_KEY, JSON.stringify(gitlab));
         localStorage.setItem(GITEA_STORAGE_KEY, JSON.stringify(giteaDraft));
         localStorage.setItem(PROVIDER_STORAGE_KEY, providerDraft);
         setSettingsOpen(false);
@@ -434,6 +466,74 @@ export const HistoryPage: React.FC = () => {
         : provider === 'gitlab' ? styles.providerBadgeGitlab
         : styles.providerBadgeGitea;
 
+    /**
+     * Token row for a provider Keycloak can broker. Three states: linked (token lives in
+     * Keycloak, no input at all), brokered but not linked yet (a Link button, with the
+     * token field tucked away as a fallback), and not brokered here (just the token field,
+     * exactly as before).
+     */
+    const renderConnection = (
+        providerKey: 'github' | 'gitlab',
+        label: string,
+        placeholder: string,
+        token: string,
+        onTokenChange: (value: string) => void
+    ) => {
+        const identity = identities[providerKey];
+        const tokenField = (
+            <label className={styles.settingsLabel}>
+                <span className="text-small">Personal access token</span>
+                <input
+                    className={styles.saveInput}
+                    type="password"
+                    placeholder={placeholder}
+                    value={token}
+                    onChange={e => onTokenChange(e.target.value)}
+                />
+            </label>
+        );
+
+        if (!identity?.available) {
+            return tokenField;
+        }
+
+        if (identity.linked) {
+            return (
+                <div className={`${styles.settingsLabelFull} ${styles.connectionRow}`}>
+                    <span className="text-small text-success">
+                        Connected to {label}
+                        {identity.username && <> as <strong>{identity.username}</strong></>}
+                    </span>
+                    <span className="text-muted text-small">
+                        The token stays on the server. Manage or remove the link in your Keycloak account.
+                    </span>
+                </div>
+            );
+        }
+
+        return (
+            <div className={`${styles.settingsLabelFull} ${styles.connectionRow}`}>
+                <div className="flex gap-sm">
+                    <button
+                        className="btn-primary text-small"
+                        onClick={() => linkAccount(providerKey)}
+                        disabled={linking === providerKey}
+                    >
+                        {linking === providerKey ? 'Opening Keycloak...' : `Connect ${label}`}
+                    </button>
+                    <span className="text-muted text-small">
+                        Recommended: the token is fetched from Keycloak and never stored in your browser.
+                    </span>
+                </div>
+                {linkError && <span className="text-small text-error">{linkError}</span>}
+                <details>
+                    <summary className="text-muted text-small">Use a personal access token instead</summary>
+                    {tokenField}
+                </details>
+            </div>
+        );
+    };
+
     const renderFilesManager = (
         providerKey: 'github' | 'gitlab' | 'gitea',
         profiles: FileProfile[]
@@ -585,16 +685,13 @@ export const HistoryPage: React.FC = () => {
                                     onChange={e => setGithubDraft(prev => ({ ...prev, githubBranch: e.target.value }))}
                                 />
                             </label>
-                            <label className={styles.settingsLabel}>
-                                <span className="text-small">Personal access token</span>
-                                <input
-                                    className={styles.saveInput}
-                                    type="password"
-                                    placeholder="ghp_..."
-                                    value={githubDraft.githubToken}
-                                    onChange={e => setGithubDraft(prev => ({ ...prev, githubToken: e.target.value }))}
-                                />
-                            </label>
+                            {renderConnection(
+                                'github',
+                                'GitHub',
+                                'ghp_...',
+                                githubDraft.githubToken,
+                                value => setGithubDraft(prev => ({ ...prev, githubToken: value }))
+                            )}
                             <div className={styles.settingsLabelFull}>
                                 {renderFilesManager('github', githubDraft.profiles)}
                             </div>
@@ -633,16 +730,13 @@ export const HistoryPage: React.FC = () => {
                                     onChange={e => setGitlabDraft(prev => ({ ...prev, gitlabBranch: e.target.value }))}
                                 />
                             </label>
-                            <label className={styles.settingsLabel}>
-                                <span className="text-small">Personal access token</span>
-                                <input
-                                    className={styles.saveInput}
-                                    type="password"
-                                    placeholder="glpat-..."
-                                    value={gitlabDraft.gitlabToken}
-                                    onChange={e => setGitlabDraft(prev => ({ ...prev, gitlabToken: e.target.value }))}
-                                />
-                            </label>
+                            {renderConnection(
+                                'gitlab',
+                                'GitLab',
+                                'glpat-...',
+                                gitlabDraft.gitlabToken,
+                                value => setGitlabDraft(prev => ({ ...prev, gitlabToken: value }))
+                            )}
                             <div className={styles.settingsLabelFull}>
                                 {renderFilesManager('gitlab', gitlabDraft.profiles)}
                             </div>
@@ -698,7 +792,7 @@ export const HistoryPage: React.FC = () => {
                     )}
 
                     <div className={styles.settingsFooter}>
-                        <span className="text-muted text-small">Settings are saved in your browser only. Do not use on shared or public devices.</span>
+                        <span className="text-muted text-small">Repository settings are saved in your browser only. So are personal access tokens - connect through Keycloak instead to keep them off this device.</span>
                         <div className="flex gap-sm">
                             <button className="btn-primary text-small" onClick={saveSettings}>Save Settings</button>
                             <button className="text-small" onClick={cancelSettings}>Cancel</button>

@@ -14,6 +14,14 @@ export default defineConfig({
     port: 5500,
     strictPort: true,
     proxy: {
+      // Account linking, listed before /api so this entry wins. changeOrigin stays off for
+      // the same reason as /oauth2 below: Spring builds the link redirect_uri from the Host
+      // header, and rewriting it would send the browser to the backend port after linking.
+      '/api/git': {
+        target: 'http://localhost:8080',
+        changeOrigin: false,
+        secure: false,
+      },
       // Catch any request starting with /api
       '/api': {
         target: 'http://localhost:8080',
@@ -23,7 +31,7 @@ export default defineConfig({
       // OIDC login endpoints. Unlike /api these deliberately keep changeOrigin off:
       // Spring builds the redirect_uri from the incoming Host header, so rewriting it
       // to localhost:8080 would send the browser back to the backend port after login
-      // instead of to the dev server. Leaving the Host as localhost:5173 keeps the
+      // instead of to the dev server. Leaving the Host as localhost:5500 keeps the
       // whole round trip on the dev server.
       '/oauth2': {
         target: 'http://localhost:8080',
