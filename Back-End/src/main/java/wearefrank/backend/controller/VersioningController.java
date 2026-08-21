@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import wearefrank.backend.dto.ConfigVersionDto;
+import wearefrank.backend.service.GitIdentityService;
 import wearefrank.backend.service.VersioningService;
 import wearefrank.backend.service.versioning.*;
 
@@ -15,9 +16,11 @@ import java.util.List;
 public class VersioningController {
 
     private final VersioningService versioningService;
+    private final GitIdentityService gitIdentityService;
 
-    public VersioningController(VersioningService versioningService) {
+    public VersioningController(VersioningService versioningService, GitIdentityService gitIdentityService) {
         this.versioningService = versioningService;
+        this.gitIdentityService = gitIdentityService;
     }
 
     @GetMapping
@@ -63,7 +66,7 @@ public class VersioningController {
 
     private GitHubConfig githubConfig(HttpServletRequest req) {
         return new GitHubConfig(
-                header(req, "X-Github-Token"),
+                token(req, "X-Github-Token", "github"),
                 header(req, "X-Github-Repo"),
                 header(req, "X-Github-Branch"),
                 header(req, "X-Github-File-Path"));
@@ -71,11 +74,22 @@ public class VersioningController {
 
     private GitLabConfig gitlabConfig(HttpServletRequest req) {
         return new GitLabConfig(
-                header(req, "X-Gitlab-Token"),
+                token(req, "X-Gitlab-Token", "gitlab"),
                 header(req, "X-Gitlab-Host"),
                 header(req, "X-Gitlab-Project"),
                 header(req, "X-Gitlab-Branch"),
                 header(req, "X-Gitlab-File-Path"));
+    }
+
+    /**
+     * A token sent by the browser still wins, so deployments without a brokered identity
+     * provider keep working on personal access tokens. Otherwise the token comes from the
+     * user's Keycloak account link and never touches the browser at all.
+     */
+    private String token(HttpServletRequest req, String headerName, String brokerAlias) {
+        String fromHeader = header(req, headerName);
+        if (!fromHeader.isBlank()) return fromHeader;
+        return gitIdentityService.brokeredToken(brokerAlias).orElse("");
     }
 
     private GiteaConfig giteaConfig(HttpServletRequest req) {

@@ -230,6 +230,23 @@
     grid-column: 1 / -1;
 }
 
+/* Keycloak account link row, above the personal-access-token fallback */
+.connectionRow {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+}
+
+.connectionRow details {
+    width: 100%;
+}
+
+.connectionRow summary {
+    cursor: pointer;
+    padding: 4px 0;
+}
+
 /* --- Profiles manager in settings --- */
 
 .profilesSection {

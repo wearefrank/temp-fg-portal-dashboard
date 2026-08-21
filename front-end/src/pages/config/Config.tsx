@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useFetch } from "../../hooks/useFetch";
+import { apiFetch } from "../../api/auth";
 import {ApisixSettings} from "../../components/Config/ApisixConnectionSettings.tsx";
 import {Link} from "react-router-dom";
 import styles from './Config.module.css';
@@ -27,7 +28,7 @@ export const Config = () => {
 
     const handleSaveApisix = async () => {
         try {
-            const response = await fetch('/api/config', {
+            const response = await apiFetch('/api/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(configState),
@@ -45,7 +46,7 @@ export const Config = () => {
 
     const handleTest = async (): Promise<boolean> => {
         try {
-            const response = await fetch(`/api/config/check`, {
+            const response = await apiFetch(`/api/config/check`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(configState),

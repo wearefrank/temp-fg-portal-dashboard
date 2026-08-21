@@ -1,3 +1,5 @@
+import { apiFetch } from './auth';
+
 const BASE_URL = '/api';
 
 interface RequestConfig extends Omit<RequestInit, 'body'> {
@@ -24,7 +26,7 @@ export async function client<T>(
         config.body = JSON.stringify(body);
     }
 
-    const response = await fetch(`${BASE_URL}${endpoint}`, config);
+    const response = await apiFetch(`${BASE_URL}${endpoint}`, config);
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => null);

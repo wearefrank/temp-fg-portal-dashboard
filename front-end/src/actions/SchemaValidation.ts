@@ -456,9 +456,10 @@ export class SchemaValidator {
         return properties;
     }
 
-    private isTemplatePlaceholder(val: unknown): boolean {
-        // checks if the string contains ${{}} as these are placeholders
-        return typeof val === 'string' && /^\$\{\{[^}]+}}$/.test(val);
+    // ${{VAR}} is resolved outside the console, so schema checks on the literal text are meaningless.
+    // Unanchored because a value can hold several placeholders, or a trailing newline from a "|" block.
+    private containsTemplatePlaceholder(val: unknown): boolean {
+        return typeof val === 'string' && /\$\{\{[^{}]+}}/.test(val);
     }
 
     private getValueAtPath(data: unknown, instancePath: string): unknown {
@@ -490,7 +491,7 @@ export class SchemaValidator {
     private filterTemplateErrors(errors: ErrorObject[], data: unknown): ErrorObject[] {
         return errors.filter(err => {
             const val = this.getValueAtPath(data, err.instancePath);
-            return !this.isTemplatePlaceholder(val);
+            return !this.containsTemplatePlaceholder(val);
         });
     }
 

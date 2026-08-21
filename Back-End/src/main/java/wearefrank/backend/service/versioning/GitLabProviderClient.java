@@ -143,11 +143,14 @@ public class GitLabProviderClient extends AbstractGitProviderClient {
         }
     }
 
+    // Bearer rather than PRIVATE-TOKEN: PRIVATE-TOKEN only accepts personal/project access
+    // tokens, and a token brokered through Keycloak is an OAuth token. GitLab accepts both
+    // kinds on Bearer, so this covers the manually entered tokens too.
     @Override
     protected HttpRequest.Builder baseRequest(String url, String token) {
         return HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .header("PRIVATE-TOKEN", token);
+                .header("Authorization", "Bearer " + token);
     }
 
     private GitLabConfig cast(GitProviderConfig config) {

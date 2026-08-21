@@ -7,12 +7,14 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import wearefrank.backend.dto.ConfigVersionDto;
+import wearefrank.backend.service.GitIdentityService;
 import wearefrank.backend.service.VersioningService;
 import wearefrank.backend.service.versioning.GitHubConfig;
 import wearefrank.backend.service.versioning.GitLabConfig;
 import wearefrank.backend.service.versioning.GiteaConfig;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -29,6 +31,10 @@ class VersioningControllerTest {
 
     @MockitoBean
     VersioningService versioningService;
+
+    // Returns no brokered token by default, so these tests keep exercising the header path.
+    @MockitoBean
+    GitIdentityService gitIdentityService;
 
     @Test
     void listVersions_defaultsToGithub_whenNoProviderHeaderGiven() throws Exception {
@@ -171,5 +177,55 @@ class VersioningControllerTest {
         mockMvc.perform(get("/api/versions/exists"))
                 .andExpect(status().isOk())
                 .andExpect(content().string("false"));
+    }
+
+    // --- Tokens brokered through Keycloak ---
+
+    @Test
+    void listVersions_usesTheBrokeredToken_whenNoTokenHeaderIsSent() throws Exception {
+        when(gitIdentityService.brokeredToken("github")).thenReturn(Optional.of("gho_brokered"));
+        GitHubConfig expectedConfig = new GitHubConfig("gho_brokered", "owner/repo", "main", "routes.yaml");
+        when(versioningService.listVersions(expectedConfig))
+                .thenReturn(List.of(new ConfigVersionDto.Summary("v1", "msg", "2026-01-01", "http://url", "alice")));
+
+        mockMvc.perform(get("/api/versions")
+                        .header("X-Github-Repo", "owner/repo")
+                        .header("X-Github-Branch", "main")
+                        .header("X-Github-File-Path", "routes.yaml"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value("v1"));
+    }
+
+    @Test
+    void listVersions_prefersTheHeaderToken_soThePersonalAccessTokenFallbackKeepsWorking() throws Exception {
+        when(gitIdentityService.brokeredToken("github")).thenReturn(Optional.of("gho_brokered"));
+        GitHubConfig expectedConfig = new GitHubConfig("pat", "owner/repo", "main", "routes.yaml");
+        when(versioningService.listVersions(expectedConfig))
+                .thenReturn(List.of(new ConfigVersionDto.Summary("v1", "msg", "2026-01-01", "http://url", "alice")));
+
+        mockMvc.perform(get("/api/versions")
+                        .header("X-Github-Token", "pat")
+                        .header("X-Github-Repo", "owner/repo")
+                        .header("X-Github-Branch", "main")
+                        .header("X-Github-File-Path", "routes.yaml"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value("v1"));
+    }
+
+    @Test
+    void listVersions_usesTheBrokeredGitlabToken_whenNoTokenHeaderIsSent() throws Exception {
+        when(gitIdentityService.brokeredToken("gitlab")).thenReturn(Optional.of("glpat_brokered"));
+        GitLabConfig expectedConfig =
+                new GitLabConfig("glpat_brokered", "https://gitlab.com", "owner/project", "main", "routes.yaml");
+        when(versioningService.listVersions(expectedConfig)).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/versions")
+                        .header("X-Git-Provider", "gitlab")
+                        .header("X-Gitlab-Host", "https://gitlab.com")
+                        .header("X-Gitlab-Project", "owner/project")
+                        .header("X-Gitlab-Branch", "main")
+                        .header("X-Gitlab-File-Path", "routes.yaml"))
+                .andExpect(status().isOk())
+                .andExpect(content().json("[]"));
     }
 }

@@ -1,55 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { client } from '../api/client';
-
-const GITHUB_STORAGE_KEY = 'github-settings';
-const GITLAB_STORAGE_KEY = 'gitlab-settings';
-const GITEA_STORAGE_KEY = 'gitea-settings';
-const PROVIDER_STORAGE_KEY = 'git-provider';
-
-// filePathOverride replaces the file path from localStorage when provided.
-function getProviderHeaders(filePathOverride?: string): Record<string, string> {
-    try {
-        const provider = localStorage.getItem(PROVIDER_STORAGE_KEY) ?? 'github';
-        if (provider === 'gitlab') {
-            const stored = localStorage.getItem(GITLAB_STORAGE_KEY);
-            const s = stored ? JSON.parse(stored) : {};
-            const filePath = filePathOverride !== undefined ? filePathOverride : (s.gitlabFilePath || '');
-            return {
-                'X-Git-Provider': 'gitlab',
-                'X-Gitlab-Token': s.gitlabToken || '',
-                'X-Gitlab-Host': s.gitlabHost || '',
-                'X-Gitlab-Project': s.gitlabProject || '',
-                'X-Gitlab-Branch': s.gitlabBranch || '',
-                'X-Gitlab-File-Path': filePath,
-            };
-        }
-        if (provider === 'gitea') {
-            const stored = localStorage.getItem(GITEA_STORAGE_KEY);
-            const s = stored ? JSON.parse(stored) : {};
-            const filePath = filePathOverride !== undefined ? filePathOverride : (s.giteaFilePath || '');
-            return {
-                'X-Git-Provider': 'gitea',
-                'X-Gitea-Token': s.giteaToken || '',
-                'X-Gitea-Host': s.giteaHost || '',
-                'X-Gitea-Repo': s.giteaRepo || '',
-                'X-Gitea-Branch': s.giteaBranch || '',
-                'X-Gitea-File-Path': filePath,
-            };
-        }
-        const stored = localStorage.getItem(GITHUB_STORAGE_KEY);
-        const s = stored ? JSON.parse(stored) : {};
-        const filePath = filePathOverride !== undefined ? filePathOverride : (s.githubFilePath || '');
-        return {
-            'X-Git-Provider': 'github',
-            'X-Github-Token': s.githubToken || '',
-            'X-Github-Repo': s.githubRepo || '',
-            'X-Github-Branch': s.githubBranch || '',
-            'X-Github-File-Path': filePath,
-        };
-    } catch {
-        return { 'X-Git-Provider': 'github' };
-    }
-}
+import { apiFetch } from '../api/auth';
+import { getProviderHeaders } from '../pages/history/gitSettingsStorage';
 
 export interface VersionSummary {
     id: string;
@@ -172,7 +124,7 @@ export function useVersionHistory(filePath: string): UseVersionHistory {
     // loads the current HEAD file directly from the repo (not a specific commit)
     const loadFileContent = async (filePathOverride?: string): Promise<string> => {
         const resolvedPath = filePathOverride !== undefined ? filePathOverride : filePath;
-        const response = await fetch('/api/versions/file', { headers: getProviderHeaders(resolvedPath) });
+        const response = await apiFetch('/api/versions/file', { headers: getProviderHeaders(resolvedPath) });
         if (!response.ok) {
             const text = await response.text();
             throw new Error(text || `HTTP ${response.status}`);

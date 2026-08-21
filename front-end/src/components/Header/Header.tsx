@@ -3,9 +3,16 @@ import { NavLink, Link } from 'react-router-dom';
 import { ThemeToggle } from '../ThemeToggle/ThemeToggle';
 import { useConfigManager } from '../../hooks/useConfigManager';
 import { client } from '../../api/client';
+import { logout } from '../../api/auth';
 import styles from './Header.module.css';
 
 type Status = 'ok' | 'error' | 'checking';
+
+interface CurrentUser {
+  name?: string;
+  roles?: string[];
+  groups?: string[];
+}
 
 const StatusDot: React.FC<{ status: Status; label: string }> = ({ status, label }) => (
   <div className={styles.indicator}>
@@ -22,6 +29,7 @@ export const Header: React.FC = () => {
   const [schemaStatus, setSchemaStatus]   = useState<Status>('checking');
   const [controlStatus, setControlStatus] = useState<Status>('checking');
   const [metricsStatus, setMetricsStatus] = useState<Status>('checking');
+  const [user, setUser] = useState<CurrentUser | null>(null);
 
   const doFetch = useCallback(() => {
     Promise.allSettled([
@@ -44,7 +52,17 @@ export const Header: React.FC = () => {
 
   useEffect(() => { doFetch(); }, [doFetch]);
 
+  useEffect(() => {
+    client<CurrentUser>('/user', { method: 'GET' })
+      .then(setUser)
+      .catch(() => setUser(null));
+  }, []);
+
   const isChecking = schemaStatus === 'checking' || controlStatus === 'checking' || metricsStatus === 'checking';
+
+  // Groups only show when the IdP maps a "groups" claim, so both parts are optional.
+  const roles = user?.roles?.join(', ') ?? '';
+  const groups = user?.groups?.join(', ') ?? '';
 
   return (
     <header className={styles.appHeader}>
@@ -89,6 +107,32 @@ export const Header: React.FC = () => {
           </button>
           <ThemeToggle />
         </div>
+      </div>
+
+      <div className={styles.userCorner}>
+        <div className={styles.userSummary} tabIndex={0}>
+          <span className={styles.userName}>{user?.name ?? 'Unknown user'}</span>
+          {roles && <span className={styles.userRole}>{roles}</span>}
+
+          {(roles || groups) && (
+            <div className={styles.userDetails} role="tooltip">
+              {roles && (
+                <div className={styles.detailRow}>
+                  <span className={styles.detailLabel}>Roles</span>
+                  <span>{roles}</span>
+                </div>
+              )}
+              {groups && (
+                <div className={styles.detailRow}>
+                  <span className={styles.detailLabel}>Groups</span>
+                  <span>{groups}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <button onClick={logout} className={styles.logoutButton}>Log out</button>
       </div>
     </header>
   );

@@ -561,6 +561,50 @@ describe('SchemaValidator — template placeholders bypass keyword validation', 
         });
         expect(v.validateConfig().valid).toBe(false);
     });
+
+    // Mirrors the real APISIX ssl schema, where client.ca carries minLength 128 - long enough
+    // that no placeholder can ever satisfy it before substitution.
+    function makeSslSchema(): SchemaCatalog {
+        return {
+            main: {
+                ssl: {
+                    type: 'object',
+                    properties: {
+                        client: {
+                            type: 'object',
+                            properties: { ca: { type: 'string', minLength: 128, maxLength: 65536 } },
+                            required: ['ca'],
+                        },
+                    },
+                },
+            },
+            plugins: {},
+        };
+    }
+
+    function validateCa(ca: string): boolean {
+        const v = new SchemaValidator();
+        v.setSchema(makeSslSchema());
+        v.setConfig({ ssls: [{ client: { ca } }] });
+        return v.validateConfig().valid;
+    }
+
+    it('accepts several placeholders in one value, as a "|" block scalar produces', () => {
+        expect(validateCa('${{IBABS_CERT}}\n${{DJUMA_CERT}}\n${{CENTRIC_CERT}}\n${{CLIENT_CA_CERT}}\n')).toBe(true);
+    });
+
+    // "ca: |" is clip chomping, so even a single placeholder arrives with a trailing newline.
+    it('accepts a single placeholder carrying the trailing newline of a "|" block scalar', () => {
+        expect(validateCa('${{CLIENT_CA_CERT}}\n')).toBe(true);
+    });
+
+    it('accepts a placeholder surrounded by literal text', () => {
+        expect(validateCa('-----BEGIN CERTIFICATE-----\n${{CLIENT_CA_CERT}}\n-----END CERTIFICATE-----')).toBe(true);
+    });
+
+    it('still rejects a too-short literal ca with no placeholder', () => {
+        expect(validateCa('-----BEGIN CERTIFICATE-----\nnot-long-enough\n')).toBe(false);
+    });
 });
 
 describe('SchemaValidator — not + dependencies conflict (upstream.tls mutually exclusive fields)', () => {

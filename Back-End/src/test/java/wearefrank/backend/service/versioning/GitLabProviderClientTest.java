@@ -225,13 +225,14 @@ class GitLabProviderClientTest {
     }
 
     @Test
-    void baseRequest_setsPrivateTokenHeader() throws Exception {
+    void baseRequest_setsBearerAuthorizationHeader() throws Exception {
         send(responseFor(200, "[]"));
 
         client.listVersions(CONFIG);
 
         ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
         verify(httpClient).send(captor.capture(), any());
-        assertThat(captor.getValue().headers().firstValue("PRIVATE-TOKEN")).contains("tok123");
+        assertThat(captor.getValue().headers().firstValue("Authorization")).contains("Bearer tok123");
+        assertThat(captor.getValue().headers().firstValue("PRIVATE-TOKEN")).isEmpty();
     }
 }
