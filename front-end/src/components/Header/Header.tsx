@@ -75,21 +75,21 @@ export const Header: React.FC = () => {
           <NavLink to="/dashboard" className={({ isActive }) => (isActive ? 'active' : undefined)}>
             Dashboard
           </NavLink>
-          <NavLink to="/yamlEditor" className={({ isActive }) => (isActive ? 'active' : undefined)}>
-            YAML Editor
-          </NavLink>
-          <NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : undefined)}>
-            History
-          </NavLink>
+          {/*<NavLink to="/yamlEditor" className={({ isActive }) => (isActive ? 'active' : undefined)}>*/}
+          {/*  YAML Editor*/}
+          {/*</NavLink>*/}
+          {/*<NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : undefined)}>*/}
+          {/*  History*/}
+          {/*</NavLink>*/}
           <NavLink to="/config" className={({ isActive }) => (isActive ? 'active' : undefined)}>
             Config
           </NavLink>
-          <NavLink to="/designer" className={({ isActive }) => (isActive ? 'active' : undefined)}>
-            Config Designer
-          </NavLink>
-          <NavLink to="/topology" className={({ isActive }) => (isActive ? 'active' : undefined)}>
-            Topology
-          </NavLink>
+          {/*<NavLink to="/designer" className={({ isActive }) => (isActive ? 'active' : undefined)}>*/}
+          {/*  Config Designer*/}
+          {/*</NavLink>*/}
+          {/*<NavLink to="/topology" className={({ isActive }) => (isActive ? 'active' : undefined)}>*/}
+          {/*  Topology*/}
+          {/*</NavLink>*/}
         </nav>
 
         <div className={styles.headerActions}>
