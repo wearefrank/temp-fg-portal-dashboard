@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - master
-      - dashboard-master
+      - dashboard-start
 
 env:
   REGISTRY: ghcr.io
