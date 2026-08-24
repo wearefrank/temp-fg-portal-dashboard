@@ -34,16 +34,17 @@ Starts Frank!Gateway (APISIX) and Prometheus. Routes are configured by editing t
 
 **Option B — Gateway + management console**
 ```bash
-docker compose --profile ui up
+SPRING_PROFILES_ACTIVE=localdev docker compose --profile ui up
 ```
-Adds the FederatedGateWay console, so you can configure and monitor everything from a browser instead.
+Adds the FederatedGateWay console, so you can configure and monitor everything from a browser instead. The console always requires a login; `localdev` gives it two throwaway accounts, `admin`/`admin` and `user`/`user`, so there is nothing to set up. **Development only**: those credentials are public. For anything else, see [Signing in](#signing-in).
 
-| Service | URL | Included in |
+| Service | URL | Started by |
 |---|---|---|
-| APISIX (proxy) | http://localhost:9880 | A & B |
-| APISIX Control API | http://localhost:9882 | A & B |
-| Prometheus | http://localhost:9090 | A & B |
-| **Console UI** | http://localhost:8080 | B only |
+| APISIX (proxy) | http://localhost:9880 | always |
+| APISIX Control API | http://localhost:9882 | always |
+| Prometheus | http://localhost:9090 | always |
+| **Console UI** | http://localhost:8080 | `--profile ui` |
+| Keycloak | http://localhost:8081 | `--profile keycloak` |
 
 > **Note:** When routing traffic to services on your host machine, use `host.docker.internal` instead of `127.0.0.1` in your upstream nodes.
 
@@ -77,6 +78,7 @@ services:
     environment:
       - APISIX_HOST=http://apisix          # point at the apisix service above
       - PROMETHEUS_URL=http://prometheus:9090
+      - CONSOLE_AUTH_TYPE=OIDC             # or IN_MEMORY, see "Signing in" below
       - KEYCLOAK_ISSUER_URI=https://keycloak.example.com/realms/frank
       - KEYCLOAK_CLIENT_ID=frank-console
       - KEYCLOAK_CLIENT_SECRET=...
@@ -121,7 +123,67 @@ See `helm/templates/console.yaml` for the full working version, including the PV
 
 ---
 
+## Signing in
+
+Every request to the console needs an authenticated user - there is no anonymous mode. How users authenticate is a single setting, `CONSOLE_AUTH_TYPE`:
+
+| Value | How users log in | Choose it when |
+|---|---|---|
+| `OIDC` (default) | Redirected to an OpenID Connect provider such as Keycloak | You have an identity provider, or you want single sign-on, group mapping, or the GitHub/GitLab token brokering below |
+| `IN_MEMORY` | A username and password form on the console itself | Running an identity provider is not an option |
+
+An unset or misspelled value stops the console from starting. That is deliberate: the alternative failure mode is a gateway admin UI that quietly serves everything unauthenticated.
+
+### OIDC
+
+The default, so there is nothing to switch on - just supply the provider:
+
+```
+KEYCLOAK_ISSUER_URI=https://keycloak.example.com/realms/frank
+KEYCLOAK_CLIENT_ID=frank-console
+KEYCLOAK_CLIENT_SECRET=...
+```
+
+Add `https://<console>/login/oauth2/code/keycloak` to the client's valid redirect URIs.
+
+The issuer is resolved on the first login rather than at startup, so a provider that is briefly unreachable costs that one login instead of stopping the console from starting. The flip side: a console that is up no longer proves the provider is reachable, so check `/api/auth/mode` and an actual login rather than the health endpoint alone.
+
+### Local accounts
+
+Accounts are provisioned by whoever runs the console. This mode is deliberately limited - no sign-up, no password reset, no MFA, no account management UI, and no login rate limiting or lockout. Changing a password means editing configuration and restarting. Each of those is a reason to move to OIDC rather than something to work around.
+
+```
+CONSOLE_AUTH_TYPE=IN_MEMORY
+CONSOLE_SECURITY_AUTH_IN_MEMORY_USERS_0_USERNAME=admin
+CONSOLE_SECURITY_AUTH_IN_MEMORY_USERS_0_PASSWORD={bcrypt}$2a$10$...
+CONSOLE_SECURITY_AUTH_IN_MEMORY_USERS_0_ROLES=gateway-user,gateway-admin
+```
+
+Repeat with `_1_`, `_2_` and so on for more users. Generate a hash with `htpasswd -bnBC 10 "" yourpassword | tr -d ':\n'` and keep the `{bcrypt}` prefix. `{noop}yourpassword` works unhashed for a throwaway local run and logs a warning saying as much.
+
+**There is no default login.** Selecting `IN_MEMORY` without configuring any users makes the console refuse to start, rather than invent an account whose password ends up in the log. For local development use the `localdev` profile instead, which ships throwaway accounts - see [Local development](#local-development).
+
+Role names are yours to choose. Using `gateway-user` and `gateway-admin` matches the Keycloak realm in `docker-compose.yaml`, so the same names reach the UI whichever mode you run.
+
+### In Helm
+
+```yaml
+console:
+  auth:
+    type: IN_MEMORY
+    inMemoryUsers:
+      - username: admin
+        password: "{bcrypt}$2a$10$..."
+        roles: [gateway-user, gateway-admin]
+```
+
+Passwords are rendered into a Secret rather than the pod spec. To keep them out of `values.yaml` entirely, create the Secret yourself with one key per username and set `console.auth.existingSecret` to its name, omitting the `password` fields. Leaving `type` at its `OIDC` default uses the `console.keycloak.*` values instead.
+
+---
+
 ## Connecting GitHub or GitLab
+
+> Requires `CONSOLE_AUTH_TYPE=OIDC`. With local accounts there is no identity provider to broker through, so the console falls back to personal access tokens.
 
 The version history page reads and writes your gateway config in a Git repository. By default it asks for a personal access token, which the browser then stores in `localStorage` and sends on every request.
 
@@ -159,14 +221,23 @@ Gitea is not brokered; it keeps using access tokens.
 **1. Start the gateway:**
 ```bash
 docker compose up
+
+# ...or, to develop against Keycloak as well:
+docker compose --profile keycloak up
 ```
 
-**2. Start the backend:**
+**2. Start the backend**, choosing how you sign in:
 ```bash
 cd Back-End
+
+# Local accounts - needs nothing else running. Log in as admin/admin or user/user.
+./mvnw spring-boot:run -Dspring-boot.run.profiles=localdev
+
+# ...or against Keycloak, which needs the profile from step 1.
+# Same two logins: the imported realm ships admin/admin and user/user.
 ./mvnw spring-boot:run
-# Runs on http://localhost:8080
 ```
+Runs on http://localhost:8080. Keycloak's own admin console is http://localhost:8081, `admin`/`admin`.
 
 
 **3. Start the frontend:**
@@ -174,10 +245,13 @@ cd Back-End
 cd front-end
 npm install
 npm run dev
-# Runs on http://localhost:5173
+# Runs on http://localhost:5500
 ```
+That port is pinned deliberately: Vite's default 5173 falls inside a range Windows reserves for Hyper-V, and a port that moves would break the OIDC redirect URI.
 
-**4.** Open http://localhost:5173/config and set the host to `http://127.0.0.1`, control port `9882`, metrics port `9881`.
+**4.** Open http://localhost:5500 and sign in. Then go to http://localhost:5500/config and set the host to `http://127.0.0.1`, control port `9882`, metrics port `9881`.
+
+To switch between the two login modes, restart the backend with or without `-Dspring-boot.run.profiles=localdev`. Nothing else changes, and the frontend needs no rebuild - it asks the backend which mode is active.
 
 ---
 
@@ -186,8 +260,12 @@ npm run dev
 A sample Helm chart is available in the `helm/` directory. It is provided as a starting point.
 
 ```bash
-helm install federated-gateway ./helm
+helm install federated-gateway ./helm \
+  --set console.keycloak.issuerUri=https://keycloak.example.com/realms/frank \
+  --set console.keycloak.clientSecret=...
 ```
+
+Those two are required by the chart's `OIDC` default, and it fails at template time without them rather than deploying something that cannot be logged into. To use local accounts instead, set `console.auth.type` and `console.auth.inMemoryUsers` - see [Signing in](#signing-in).
 
 ---
 

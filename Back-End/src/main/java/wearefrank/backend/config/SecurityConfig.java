@@ -1,32 +1,42 @@
 package wearefrank.backend.config;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClientProviderBuilder;
-import org.springframework.security.oauth2.client.oidc.web.logout.OidcClientInitiatedLogoutSuccessHandler;
-import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
-import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizedClientManager;
-import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
 import org.springframework.security.web.util.matcher.NegatedRequestMatcher;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import wearefrank.backend.config.security.ConsoleAuthenticator;
 
 import static org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher.pathPattern;
 
+/**
+ * Everything the console's security has in common, whichever way users log in. The login
+ * mechanism itself comes from the {@link ConsoleAuthenticator} selected by
+ * console.security.auth.type - keeping the shared parts here means a new authenticator
+ * cannot quietly miss one of them.
+ */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http, ClientRegistrationRepository clientRegistrations) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http, ObjectProvider<ConsoleAuthenticator> authenticators)
+            throws Exception {
+
+        // No authenticator means the type is unset or misspelled. Refusing to start is the
+        // point: the alternative is a console that silently serves everything unauthenticated.
+        ConsoleAuthenticator authenticator = authenticators.getIfAvailable();
+        if (authenticator == null) {
+            throw new IllegalStateException(
+                    "No authenticator for console.security.auth.type. Set it to OIDC or IN_MEMORY.");
+        }
 
         CsrfTokenRequestAttributeHandler csrfHandler = new CsrfTokenRequestAttributeHandler();
         csrfHandler.setCsrfRequestAttributeName(null);
@@ -36,13 +46,16 @@ public class SecurityConfig {
         HttpSessionRequestCache requestCache = new HttpSessionRequestCache();
         requestCache.setRequestMatcher(new NegatedRequestMatcher(pathPattern("/api/**")));
 
-        OidcClientInitiatedLogoutSuccessHandler logoutSuccessHandler =
-                new OidcClientInitiatedLogoutSuccessHandler(clientRegistrations);
-        logoutSuccessHandler.setPostLogoutRedirectUri("{baseUrl}");
-
         http
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health/**").permitAll()
+                        // The login page has to render before there is a session, and it is the
+                        // page that asks which login mechanism to show.
+                        .requestMatchers(ConsoleAuthenticator.LOGIN_PAGE, "/api/auth/mode").permitAll()
+                        // Error dispatches run through this chain too. Leaving /error to
+                        // authentication turns any error raised while signed out into a
+                        // redirect back to the login page, which is a loop rather than an answer.
+                        .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
@@ -51,30 +64,10 @@ public class SecurityConfig {
                 .exceptionHandling(ex -> ex.defaultAuthenticationEntryPointFor(
                         new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
                         pathPattern("/api/**")))
-                .requestCache(cache -> cache.requestCache(requestCache))
-                .oauth2Login(Customizer.withDefaults())
-                .logout(logout -> logout.logoutSuccessHandler(logoutSuccessHandler));
+                .requestCache(cache -> cache.requestCache(requestCache));
+
+        authenticator.configure(http);
 
         return http.build();
-    }
-
-    /**
-     * Lets the app reuse the login's access token for its own calls to Keycloak, and
-     * refresh it when it expires. oauth2Login by itself never refreshes, and the realm's
-     * access tokens live an hour - shorter than a working session, so without this the
-     * broker-token lookups would start failing mid-session.
-     */
-    @Bean
-    OAuth2AuthorizedClientManager authorizedClientManager(
-            ClientRegistrationRepository clientRegistrations,
-            OAuth2AuthorizedClientRepository authorizedClients) {
-
-        DefaultOAuth2AuthorizedClientManager manager =
-                new DefaultOAuth2AuthorizedClientManager(clientRegistrations, authorizedClients);
-        manager.setAuthorizedClientProvider(OAuth2AuthorizedClientProviderBuilder.builder()
-                .authorizationCode()
-                .refreshToken()
-                .build());
-        return manager;
     }
 }

@@ -55,6 +55,7 @@ public class GitIdentityService {
     private static final Logger log = LoggerFactory.getLogger(GitIdentityService.class);
 
     private static final String REGISTRATION_ID = "keycloak";
+    private static final String OIDC_AUTH_TYPE = "OIDC";
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
     private final HttpClient httpClient;
@@ -68,14 +69,20 @@ public class GitIdentityService {
             @Qualifier("keycloakHttpClient") HttpClient httpClient,
             ObjectMapper objectMapper,
             OAuth2AuthorizedClientManager authorizedClientManager,
-            @Value("${spring.security.oauth2.client.provider.keycloak.issuer-uri:}") String issuerUri,
-            @Value("${spring.security.oauth2.client.registration.keycloak.client-id:}") String clientId,
+            @Value("${console.security.auth.type:}") String authType,
+            @Value("${console.security.auth.oidc.issuer-uri:}") String issuerUri,
+            @Value("${console.security.auth.oidc.client-id:}") String clientId,
             @Value("${git.broker.providers:github,gitlab}") String brokeredProviders) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.authorizedClientManager = authorizedClientManager;
-        this.issuerUri = trimTrailingSlash(issuerUri);
-        this.clientId = clientId;
+        // Brokering needs an identity provider to broker through. The OIDC settings are
+        // readable whatever the active authenticator, so blank them out when it is not the
+        // one in use - isAvailable() then reports the feature off, as it does for a realm
+        // that brokers nothing.
+        boolean brokering = OIDC_AUTH_TYPE.equals(authType);
+        this.issuerUri = brokering ? trimTrailingSlash(issuerUri) : "";
+        this.clientId = brokering ? clientId : "";
         this.brokeredProviders = parseProviders(brokeredProviders);
     }
 
