@@ -8,3 +8,36 @@ prometheus:
 console:
   image: ghcr.io/wearefrank/federated-gateway-console:latest
   port: 8080
+  # Set to "none" when the console is reached directly instead of through an
+  # ingress, since X-Forwarded-* is then caller-controlled.
+  forwardHeadersStrategy: framework
+  # How users sign in. OIDC uses the keycloak block below; IN_MEMORY uses inMemoryUsers.
+  # Every request needs a login either way - there is no anonymous mode, and any other
+  # value stops the chart from rendering rather than deploying something open.
+  auth:
+    type: OIDC
+    # Only read when type is IN_MEMORY, and required then. Operator-provisioned: no
+    # sign-up, no password reset, no MFA. A deployment that outgrows that wants OIDC.
+    # Passwords need a password-encoder prefix and are written into a Secret rather
+    # than the pod spec. To keep them out of values.yaml entirely, set existingSecret
+    # to a Secret with one key per username and omit the password fields.
+    inMemoryUsers: []
+    #  - username: admin
+    #    password: "{bcrypt}$2a$10$..."
+    #    roles: [gateway-user, gateway-admin]
+    existingSecret: ""
+  # OIDC provider, required when auth.type is OIDC. The issuer is resolved on the first
+  # login rather than at startup, so a provider that is briefly unreachable costs that
+  # login instead of crashlooping the pod.
+  keycloak:
+    issuerUri: ""
+    clientId: frank-confidential
+    # Either set clientSecret, or point existingSecret at a Secret holding a
+    # "client-secret" key.
+    clientSecret: ""
+    existingSecret: ""
+  # Git providers this realm brokers as identity providers, so users can connect their
+  # GitHub/GitLab account instead of pasting a personal access token into the browser.
+  # Each alias must exist in the realm with "Store tokens" and "Stored tokens readable" on.
+  # Set to "" when the realm brokers neither; the console then only offers access tokens.
+  gitBrokerProviders: "github,gitlab"

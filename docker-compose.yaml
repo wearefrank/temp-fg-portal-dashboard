@@ -77,6 +77,18 @@ services:
     environment:
       - PROMETHEUS_URL=http://host.docker.internal:9090
       - APISIX_HOST=http://host.docker.internal
+      # How users sign in: OIDC uses the Keycloak settings below, IN_MEMORY uses accounts
+      # you provision yourself. To try the console without running Keycloak at all, set
+      # SPRING_PROFILES_ACTIVE=localdev instead - it brings throwaway admin/admin and
+      # user/user accounts and needs nothing else.
+      - CONSOLE_AUTH_TYPE=${CONSOLE_AUTH_TYPE:-OIDC}
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-}
+      # For a real IN_MEMORY deployment, provision accounts here instead of the profile.
+      # Passwords need a {bcrypt} prefix; leave these commented out under OIDC, since an
+      # empty username would be read as a user with no password and stop the app.
+      # - CONSOLE_SECURITY_AUTH_IN_MEMORY_USERS_0_USERNAME=admin
+      # - CONSOLE_SECURITY_AUTH_IN_MEMORY_USERS_0_PASSWORD={bcrypt}$$2a$$10$$replace.me
+      # - CONSOLE_SECURITY_AUTH_IN_MEMORY_USERS_0_ROLES=gateway-user,gateway-admin
       # The keycloak profile above pins its issuer to localhost:8081, which this
       # container cannot reach, so override these to run the console in compose.
       - KEYCLOAK_ISSUER_URI=${KEYCLOAK_ISSUER_URI:-http://localhost:8081/realms/frank}

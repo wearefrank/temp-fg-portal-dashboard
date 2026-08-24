@@ -38,7 +38,16 @@ export default defineConfig({
         changeOrigin: false,
         secure: false,
       },
-      '/login': {
+      // Only the parts of /login that belong to Spring: the OIDC callback and the password
+      // form's POST target. Plain /login stays with Vite, which serves the console's own
+      // login page - proxying all of /login would hand that route to the backend, where in
+      // dev there is no built SPA to return.
+      '/login/oauth2': {
+        target: 'http://localhost:8080',
+        changeOrigin: false,
+        secure: false,
+      },
+      '/login/password': {
         target: 'http://localhost:8080',
         changeOrigin: false,
         secure: false,

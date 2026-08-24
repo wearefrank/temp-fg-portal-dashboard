@@ -1,4 +1,12 @@
-{{- if not .Values.console.keycloak.existingSecret }}
+{{- $auth := .Values.console.auth }}
+{{- $authType := $auth.type | default "OIDC" }}
+{{- if not (has $authType (list "OIDC" "IN_MEMORY")) }}
+  {{- fail (printf "console.auth.type must be OIDC or IN_MEMORY, got %q" $authType) }}
+{{- end }}
+{{- if and (eq $authType "IN_MEMORY") (not $auth.inMemoryUsers) }}
+  {{- fail "console.auth.type is IN_MEMORY but console.auth.inMemoryUsers is empty - the console would have no way in" }}
+{{- end }}
+{{- if and (eq $authType "OIDC") (not .Values.console.keycloak.existingSecret) }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -6,6 +14,18 @@ metadata:
 type: Opaque
 stringData:
   client-secret: {{ required "set console.keycloak.clientSecret or console.keycloak.existingSecret" .Values.console.keycloak.clientSecret | quote }}
+---
+{{- end }}
+{{- if and (eq $authType "IN_MEMORY") (not $auth.existingSecret) }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-console-users
+type: Opaque
+stringData:
+  {{- range $auth.inMemoryUsers }}
+  {{ .username }}: {{ required (printf "console user %q needs a password, or set console.auth.existingSecret" .username) .password | quote }}
+  {{- end }}
 ---
 {{- end }}
 apiVersion: v1
@@ -45,8 +65,11 @@ spec:
               value: "9092"
             - name: APISIX_METRICS_PORT
               value: "9091"
+            - name: CONSOLE_AUTH_TYPE
+              value: {{ $authType | quote }}
+            {{- if eq $authType "OIDC" }}
             - name: KEYCLOAK_ISSUER_URI
-              value: {{ required "console.keycloak.issuerUri is required" .Values.console.keycloak.issuerUri | quote }}
+              value: {{ required "console.keycloak.issuerUri is required when console.auth.type is OIDC" .Values.console.keycloak.issuerUri | quote }}
             - name: KEYCLOAK_CLIENT_ID
               value: {{ .Values.console.keycloak.clientId | quote }}
             - name: KEYCLOAK_CLIENT_SECRET
@@ -54,6 +77,22 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.console.keycloak.existingSecret | default (printf "%s-console-oidc" .Release.Name) }}
                   key: client-secret
+            # Brokering git tokens needs an identity provider, so it only applies here.
+            - name: GIT_BROKER_PROVIDERS
+              value: {{ .Values.console.gitBrokerProviders | quote }}
+            {{- else }}
+            {{- range $i, $user := $auth.inMemoryUsers }}
+            - name: CONSOLE_SECURITY_AUTH_IN_MEMORY_USERS_{{ $i }}_USERNAME
+              value: {{ $user.username | quote }}
+            - name: CONSOLE_SECURITY_AUTH_IN_MEMORY_USERS_{{ $i }}_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $auth.existingSecret | default (printf "%s-console-users" $.Release.Name) }}
+                  key: {{ $user.username }}
+            - name: CONSOLE_SECURITY_AUTH_IN_MEMORY_USERS_{{ $i }}_ROLES
+              value: {{ join "," ($user.roles | default list) | quote }}
+            {{- end }}
+            {{- end }}
             - name: FORWARD_HEADERS_STRATEGY
               value: {{ .Values.console.forwardHeadersStrategy | quote }}
           ports:
