@@ -1,0 +1,18 @@
+<!doctype html>
+<!--
+Stand-in for the SPA shell that the Docker build copies into src/main/resources/static.
+It is not in the repository, so without this the security tests would exercise a console
+that serves no frontend at all - which is exactly the case that cannot regress.
+Only the two tags that broke matter here; they mirror what vite build emits.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Frank!GateWay</title>
+    <script type="module" crossorigin src="/assets/index-test.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-test.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

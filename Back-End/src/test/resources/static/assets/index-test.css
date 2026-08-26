@@ -1,0 +1,2 @@
+/* Stand-in for the hashed stylesheet vite emits into dist/assets. See index-test.js. */
+#root { display: block; }

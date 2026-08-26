@@ -52,6 +52,14 @@ public class SecurityConfig {
                         // The login page has to render before there is a session, and it is the
                         // page that asks which login mechanism to show.
                         .requestMatchers(ConsoleAuthenticator.LOGIN_PAGE, "/api/auth/mode").permitAll()
+                        // ...and the login page cannot render without its own bundle. Left
+                        // authenticated, the SPA's script and stylesheet are answered by the
+                        // entry point below rather than served: a script asks for */* instead
+                        // of HTML, so it misses formLogin's media type matcher and gets the
+                        // bodyless 401. The page that asks for credentials then never boots,
+                        // and all the browser reports is a blocked empty MIME type. Only build
+                        // output lives here - everything that reads or writes is under /api.
+                        .requestMatchers("/assets/**", "/vite.svg", "/favicon.ico").permitAll()
                         // Error dispatches run through this chain too. Leaving /error to
                         // authentication turns any error raised while signed out into a
                         // redirect back to the login page, which is a loop rather than an answer.

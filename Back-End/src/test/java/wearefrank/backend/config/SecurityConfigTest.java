@@ -7,6 +7,11 @@ import wearefrank.backend.config.security.ConsoleAuthenticator;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
+/**
+ * The startup contract. What the filter chain actually lets through is asserted against a
+ * running application in {@link LoginPageAccessTest}, which is where the matchers and the
+ * static resource handler meet.
+ */
 class SecurityConfigTest {
 
     /**
