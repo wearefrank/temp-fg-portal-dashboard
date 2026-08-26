@@ -1,0 +1,282 @@
+.fullWidthCard {
+    grid-column: 1 / -1;
+}
+
+.emptyHint {
+    margin: 0.75rem 0;
+}
+
+/* Tall enough for a screenful of lines, then scrolls - the card must not grow with
+   the limit, or a 1000-row fetch pushes every panel below it off the page. */
+.tableArea {
+    max-height: 420px;
+    overflow: auto;
+}
+
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.75rem 0 0.25rem;
+}
+
+.searchWrap {
+    position: relative;
+    flex: 1 1 220px;
+    min-width: 180px;
+}
+
+.search {
+    width: 100%;
+    padding: 0.35rem 1.9rem 0.35rem 0.6rem;
+    font-size: 0.85rem;
+    font-family: inherit;
+    color: inherit;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+.search:focus {
+    outline: none;
+    border-color: var(--color-primary, #3b82f6);
+}
+
+.clearSearch {
+    position: absolute;
+    right: 0.35rem;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.2rem;
+}
+
+.count {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.countValue {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.logTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+}
+
+.logTable th,
+.logTable td {
+    padding: 0.35rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-dim);
+    white-space: nowrap;
+}
+
+.logTable th {
+    color: var(--text-secondary);
+    font-weight: 600;
+    /* The header has to survive the scroll above, otherwise the columns are unlabelled
+       as soon as you look at anything but the newest rows. */
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    z-index: 1;
+}
+
+.logTable tr:last-child td {
+    border-bottom: none;
+}
+
+.logTable tbody tr:hover {
+    background: var(--bg-tertiary);
+}
+
+.clickableRow {
+    cursor: pointer;
+}
+
+.expandCell {
+    width: 1.5rem;
+    color: var(--text-secondary);
+    user-select: none;
+}
+
+/* The one column allowed to be long, so a request path does not set the table's width. */
+.pathCell {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.numeric {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.statusBadge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #fff;
+}
+
+.muted {
+    color: var(--text-secondary);
+}
+
+/* The full original line, revealed by clicking a row. white-space: pre-wrap so the JSON
+   keeps its formatting without forcing the table wider. */
+.rawCell {
+    padding: 0 0.75rem 0.6rem 2.25rem !important;
+    white-space: pre-wrap !important;
+    word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+}
+
+.rawRow:hover {
+    background: transparent;
+}
+
+.copyButton {
+    margin-top: 0.4rem;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.75rem;
+    font-family: inherit;
+    color: inherit;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.pager {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
+    margin-top: 0.75rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border-dim);
+}
+
+.pageBtn {
+    min-width: 1.9rem;
+    padding: 0.2rem 0.45rem;
+    font-size: 0.82rem;
+    font-family: inherit;
+    font-variant-numeric: tabular-nums;
+    color: inherit;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.pageBtn:hover:not(:disabled):not(.pageBtnActive) {
+    background: var(--bg-tertiary);
+}
+
+.pageBtn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.pageBtnActive {
+    background: var(--color-primary, #3b82f6);
+    border-color: var(--color-primary, #3b82f6);
+    color: #fff;
+    font-weight: 600;
+}
+
+.pageGap {
+    padding: 0 0.2rem;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+}
+
+.pagerNote {
+    margin-left: 0.5rem;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.columnsMenuWrap {
+    position: relative;
+}
+
+.columnsMenu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 5;
+    min-width: 150px;
+    padding: 0.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: var(--shadow-md);
+}
+
+.columnsMenuItem {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.15rem 0.3rem;
+    font-size: 0.82rem;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.columnsMenuItem:hover {
+    background: var(--bg-tertiary);
+}
+
+.pageSize {
+    padding: 0.25rem 0.4rem;
+    font-size: 0.82rem;
+    font-family: inherit;
+    color: inherit;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+/* The sortable header is a button so it is reachable by keyboard, but it has to keep
+   looking like a table header rather than a control. */
+.sortHeader {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.sortIndicator {
+    opacity: 0.55;
+    font-size: 0.75rem;
+}

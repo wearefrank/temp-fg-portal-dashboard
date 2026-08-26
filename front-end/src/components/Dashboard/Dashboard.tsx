@@ -6,6 +6,8 @@ import { client } from '../../api/client';
 import styles from './Dashboard.module.css';
 import { PromLineChart, RangeToggle, ChartTooltip, buildCodeMaps, RANGE_OPTIONS } from '../PromLineChart/PromLineChart';
 import type { RangeLabel } from '../PromLineChart/PromLineChart';
+import { LokiLogTable } from '../LokiLogTable/LokiLogTable';
+import { MessagesCounter } from '../MessagesCounter/MessagesCounter';
 
 interface PromResult {
     metric: Record<string, string>;
@@ -69,17 +71,30 @@ export const Dashboard: React.FC = () => {
     const metricsFetch = useFetch<MetricsDto>('/metrics/prometheus');
     const liveRoutesFetch = useFetch<LiveRoute[]>('/metrics/routes');
     const liveUpstreamsFetch = useFetch<LiveUpstream[]>('/metrics/upstreams');
+    // The metrics above are scraped from the APISIX exporter, which answers whether APISIX is up -
+    // not whether Prometheus is. This asks the Prometheus server directly.
+    const prometheusHealthFetch = useFetch<boolean>('/metrics/prometheus/health');
+    // One line is enough to answer "is Loki reachable" for the status card; the table
+    // below fetches its own window.
+    const lokiHealthFetch = useFetch<unknown[]>('/logs/recent?limit=1&startTime=0');
     const [barRangeLabel, setBarRangeLabel] = useState<RangeLabel>('All');
     const [routeTableRangeLabel, setRouteTableRangeLabel] = useState<RangeLabel>('All');
     const [refreshKey, setRefreshKey] = useState(0);
     const selectedBarRange = RANGE_OPTIONS.find(r => r.label === barRangeLabel)!;
     const selectedRouteTableRange = RANGE_OPTIONS.find(r => r.label === routeTableRangeLabel)!;
     const barEndpoint = useMemo(() => {
-        const query = `sum by (code) (last_over_time(apisix_http_status[${selectedBarRange.barWindow}]))`;
+        // increase(), not last_over_time(). apisix_http_status is a cumulative counter, so
+        // last_over_time returns the running total rather than the count for the window -
+        // "1h" was reporting everything since the gateway started. increase() also handles
+        // counter resets, so an APISIX restart no longer erases the history, and it does not
+        // sum the final values of dead series from earlier container runs on top of the live
+        // ones (that is what inflated the all-time figure ~60x).
+        const query = `round(sum by (code) (increase(apisix_http_status[${selectedBarRange.barWindow}])))`;
         return '/metrics/prom-query?query=' + encodeURIComponent(query);
     }, [selectedBarRange.barWindow]);
     const routeTableEndpoint = useMemo(() => {
-        const query = `sum by (route, code) (last_over_time(apisix_http_status[${selectedRouteTableRange.barWindow}]))`;
+        // Same correction as the bar chart above.
+        const query = `round(sum by (route, code) (increase(apisix_http_status[${selectedRouteTableRange.barWindow}])))`;
         return '/metrics/prom-query?query=' + encodeURIComponent(query);
     }, [selectedRouteTableRange.barWindow]);
     const httpStatusFetch = useFetch<PromQueryResponse>(barEndpoint);
@@ -138,6 +153,8 @@ export const Dashboard: React.FC = () => {
             metricsFetch.refetch();
             liveRoutesFetch.refetch();
             liveUpstreamsFetch.refetch();
+            prometheusHealthFetch.refetch();
+            lokiHealthFetch.refetch();
             httpStatusRefetchRef.current();
             routeTableRefetchRef.current();
             setRefreshKey(k => k + 1);
@@ -153,6 +170,10 @@ export const Dashboard: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // useFetch keeps the last successful value on a failed refetch, so the error has to be
+    // checked too - otherwise a stale `true` would keep reporting Prometheus as active.
+    const prometheusUp = prometheusHealthFetch.data === true && !prometheusHealthFetch.error;
+
     const statusDotClass =
         controlStatus === 'online'  ? styles.statusDotOnline  :
         controlStatus === 'offline' ? styles.statusDotOffline :
@@ -162,13 +183,13 @@ export const Dashboard: React.FC = () => {
     if (httpStatusFetch.loading) barSubtitle = 'Loading…';
     else if (httpStatusFetch.error) barSubtitle = 'Prometheus unavailable';
     else if (httpStatusFetch.data?.data?.result?.length === 0) barSubtitle = 'No data yet — send requests through APISIX to populate this chart';
-    else barSubtitle = `via Prometheus: last_over_time(apisix_http_status[${selectedBarRange.barWindow}])`;
+    else barSubtitle = `via Prometheus: increase(apisix_http_status[${selectedBarRange.barWindow}]) · ${selectedBarRange.label === 'All' ? 'everything Prometheus still retains' : `last ${selectedBarRange.label}`}`;
 
     let routeTableSubtitle: string;
     if (routeTableFetch.loading) routeTableSubtitle = 'Loading…';
     else if (routeTableFetch.error) routeTableSubtitle = 'Prometheus unavailable';
     else if (routeTableFetch.data?.data?.result?.length === 0) routeTableSubtitle = 'No data yet — send requests through APISIX to populate this table';
-    else routeTableSubtitle = `via Prometheus: last_over_time(apisix_http_status[${selectedRouteTableRange.barWindow}]) grouped by route and code`;
+    else routeTableSubtitle = `via Prometheus: increase(apisix_http_status[${selectedRouteTableRange.barWindow}]) grouped by route and code · ${selectedRouteTableRange.label === 'All' ? 'everything Prometheus still retains' : `last ${selectedRouteTableRange.label}`}`;
 
     return (
         <div className="container">
@@ -178,6 +199,8 @@ export const Dashboard: React.FC = () => {
             </h1>
 
             <div className={styles.grid}>
+                <MessagesCounter title="Messages Handled" refreshKey={refreshKey} />
+
                 <div className="card">
                     <div className="card-header">APISIX Status</div> {/* Card title */}
                     <div className={styles.statusRow}>
@@ -192,10 +215,16 @@ export const Dashboard: React.FC = () => {
                         </div>
                     )}
                     <div className={styles.statsList}>
-                        <div className={`${styles.statRow} ${metricsFetch.loading ? '' : metricsFetch.data ? 'text-success' : 'text-error'}`}>
+                        <div className={`${styles.statRow} ${prometheusHealthFetch.loading ? '' : prometheusUp ? 'text-success' : 'text-error'}`}>
                             <span>Prometheus</span>
                             <strong>
-                                {metricsFetch.loading ? 'Checking' : metricsFetch.data ? 'Active' : 'Inactive'}
+                                {prometheusHealthFetch.loading ? 'Checking' : prometheusUp ? 'Active' : 'Inactive'}
+                            </strong>
+                        </div>
+                        <div className={`${styles.statRow} ${lokiHealthFetch.loading ? '' : lokiHealthFetch.error ? 'text-error' : 'text-success'}`}>
+                            <span>Loki</span>
+                            <strong>
+                                {lokiHealthFetch.loading ? 'Checking' : lokiHealthFetch.error ? 'Inactive' : 'Active'}
                             </strong>
                         </div>
                     </div>
@@ -207,7 +236,14 @@ export const Dashboard: React.FC = () => {
                             {metricsFetch.data.hostname && (
                                 <div className={styles.statRow}><span>Hostname</span><strong>{metricsFetch.data.hostname}</strong></div>
                             )}
-                            <div className={styles.statRow}><span>Total Requests</span><strong>{metricsFetch.data.totalRequests.toLocaleString()}</strong></div>
+                            {/* apisix_http_requests_total is nginx-level: it counts every request the
+                                process handled, monitoring scrapes included, so it climbs even when the
+                                gateway is proxying nothing. Labelled for what it is - the routed count
+                                is the "Messages Handled" card. */}
+                            <div className={styles.statRow}>
+                                <span>HTTP requests <span className="text-muted">(incl. monitoring)</span></span>
+                                <strong>{metricsFetch.data.totalRequests.toLocaleString()}</strong>
+                            </div>
                             {Object.entries(metricsFetch.data.connections).map(([state, count]) => (
                                 <div key={state} className={styles.statRow}>
                                     <span>Connections ({state})</span><strong>{count}</strong>
@@ -263,7 +299,7 @@ export const Dashboard: React.FC = () => {
                     ))}
                 </div>
                 <div className={`card ${styles.fullWidthCard}`}>
-                    <div className="card-header">HTTP Status Codes — All Time</div> {/* Card title */}
+                    <div className="card-header">HTTP Status Codes</div> {/* Card title */}
                     <RangeToggle value={barRangeLabel} onChange={setBarRangeLabel} />
                     <div className={`text-small text-muted ${styles.emptyHint}`}>{barSubtitle}</div>
                     <div className={styles.chartArea}>
@@ -327,11 +363,16 @@ export const Dashboard: React.FC = () => {
                     subtitle={r => `Via Prometheus: increase(apisix_http_status[${r.promRange}]) · ${r.label === 'All' ? 'all time' : `last ${r.label}`} · ${r.promRange} buckets`}
                     refreshKey={refreshKey}
                 />
-                <PromLineChart
-                    title="Requests by Route"
-                    queryTemplate="round(sum by (route) (increase(apisix_http_status[$RANGE])))"
-                    seriesKey="route"
-                    subtitle={r => `Via Prometheus: increase(apisix_http_status[${r.promRange}]) grouped by route · ${r.label === 'All' ? 'all time' : `last ${r.label}`}`}
+                {/*<PromLineChart*/}
+                {/*    title="Requests by Route"*/}
+                {/*    queryTemplate="round(sum by (route) (increase(apisix_http_status[$RANGE])))"*/}
+                {/*    seriesKey="route"*/}
+                {/*    subtitle={r => `Via Prometheus: increase(apisix_http_status[${r.promRange}]) grouped by route · ${r.label === 'All' ? 'all time' : `last ${r.label}`}`}*/}
+                {/*    refreshKey={refreshKey}*/}
+                {/*/>*/}
+                <LokiLogTable
+                    title="Gateway Access Log"
+                    defaultPageSize={25}
                     refreshKey={refreshKey}
                 />
                 {/*<PromLineChart*/}

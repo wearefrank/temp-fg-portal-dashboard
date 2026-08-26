@@ -111,4 +111,22 @@ class MetricsControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value("u1"));
     }
+
+    @Test
+    void getPrometheusHealth_returnsTrue_whenPrometheusIsReachable() throws Exception {
+        when(metricsService.isPrometheusHealthy()).thenReturn(true);
+
+        mockMvc.perform(get("/api/metrics/prometheus/health"))
+                .andExpect(status().isOk())
+                .andExpect(content().string("true"));
+    }
+
+    @Test
+    void getPrometheusHealth_returnsFalse_whenPrometheusIsDown() throws Exception {
+        when(metricsService.isPrometheusHealthy()).thenReturn(false);
+
+        mockMvc.perform(get("/api/metrics/prometheus/health"))
+                .andExpect(status().isOk())
+                .andExpect(content().string("false"));
+    }
 }

@@ -56,6 +56,21 @@ public class PrometheusClient {
         }
     }
 
+    // liveness probe against the Prometheus server itself, not the APISIX exporter.
+    // returns false instead of throwing so the UI can show an "inactive" indicator gracefully
+    public boolean isHealthy() {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/-/healthy"))
+                    .timeout(Duration.ofSeconds(5))
+                    .GET()
+                    .build();
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofString()).statusCode() == 200;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private String get(String url) {
         try {
             HttpRequest request = HttpRequest.newBuilder()

@@ -1,0 +1,33 @@
+.value {
+    font-size: 2.4rem;
+    font-weight: 700;
+    line-height: 1.1;
+    margin: 0.6rem 0 0.2rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+
+.valueMuted {
+    color: var(--text-secondary);
+}
+
+.caption {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.secondary {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    margin-top: 0.9rem;
+    padding-top: 0.7rem;
+    border-top: 1px solid var(--border-dim);
+    font-size: 0.85rem;
+}
+
+.secondaryValue {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}

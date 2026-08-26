@@ -72,6 +72,12 @@ public class MetricsService {
         return prometheusClient.rangeQuery(query, resolvedStart, now, resolvedStep);
     }
 
+    // health of the Prometheus server. The metrics below come from the APISIX exporter, which
+    // stays reachable whether or not Prometheus is running - so it cannot answer this question.
+    public boolean isPrometheusHealthy() {
+        return prometheusClient.isHealthy();
+    }
+
     // raw text/plain scrape - passed through unchanged for the frontend to display
     public String getPrometheusRaw() {
         return apisixClient.metricsGet("/apisix/prometheus/metrics");

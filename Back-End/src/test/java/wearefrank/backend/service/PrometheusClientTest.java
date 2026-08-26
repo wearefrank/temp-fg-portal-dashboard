@@ -20,6 +20,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -165,5 +166,40 @@ class PrometheusClientTest {
         assertThatThrownBy(() -> prometheusClient.getTsdbMinTime())
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Failed to fetch Prometheus TSDB status");
+    }
+
+    @Test
+    void isHealthy_returnsTrue_on200() throws Exception {
+        doReturn(httpResponse).when(httpClient).send(any(), any());
+        when(httpResponse.statusCode()).thenReturn(200);
+
+        assertThat(prometheusClient.isHealthy()).isTrue();
+    }
+
+    @Test
+    void isHealthy_returnsFalse_onNon200() throws Exception {
+        doReturn(httpResponse).when(httpClient).send(any(), any());
+        when(httpResponse.statusCode()).thenReturn(503);
+
+        assertThat(prometheusClient.isHealthy()).isFalse();
+    }
+
+    @Test
+    void isHealthy_returnsFalse_whenPrometheusIsDown() throws Exception {
+        doThrow(new IOException("connection refused")).when(httpClient).send(any(), any());
+
+        assertThat(prometheusClient.isHealthy()).isFalse();
+    }
+
+    @Test
+    void isHealthy_queriesTheHealthEndpoint() throws Exception {
+        doReturn(httpResponse).when(httpClient).send(any(), any());
+        when(httpResponse.statusCode()).thenReturn(200);
+
+        prometheusClient.isHealthy();
+
+        ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(httpClient).send(captor.capture(), any());
+        assertThat(captor.getValue().uri().toString()).isEqualTo("http://localhost:9090/-/healthy");
     }
 }

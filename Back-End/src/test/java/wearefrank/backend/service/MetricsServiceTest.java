@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -237,5 +238,23 @@ class MetricsServiceTest {
 
         assertThat(result.version()).isNull();
         assertThat(result.hostname()).isNull();
+    }
+
+    @Test
+    void isPrometheusHealthy_delegatesToPrometheusClient() {
+        when(prometheusClient.isHealthy()).thenReturn(false);
+
+        assertThat(metricsService.isPrometheusHealthy()).isFalse();
+
+        verify(prometheusClient).isHealthy();
+    }
+
+    @Test
+    void isPrometheusHealthy_doesNotConsultTheApisixExporter() {
+        when(prometheusClient.isHealthy()).thenReturn(true);
+
+        assertThat(metricsService.isPrometheusHealthy()).isTrue();
+
+        verifyNoInteractions(apisixClient);
     }
 }
