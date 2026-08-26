@@ -65,6 +65,7 @@ public class SecurityConfig {
                         // redirect back to the login page, which is a loop rather than an answer.
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())
+                  .csrf(csrf -> csrf.disable())
 //                .csrf(csrf -> csrf
 //                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
 //                        .csrfTokenRequestHandler(csrfHandler))
