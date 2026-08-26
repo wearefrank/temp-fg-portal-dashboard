@@ -73,7 +73,12 @@ class LogsServiceTest {
 
     @BeforeEach
     void setUp() {
-        logsService = new LogsService(lokiClient, new ObjectMapper().findAndRegisterModules());
+        logsService = new LogsService(lokiClient, new ObjectMapper().findAndRegisterModules(), "", "namespace");
+    }
+
+    /** The same service as the one under test, but with LOKI_NAMESPACE set. */
+    private LogsService pinnedTo(String namespace, String label) {
+        return new LogsService(lokiClient, new ObjectMapper().findAndRegisterModules(), namespace, label);
     }
 
     @Test
@@ -341,6 +346,95 @@ class LogsServiceTest {
         // a lone backslash must not end up escaping the closing quote
         assertThat(logsService.buildPipeline(null, "c:\\temp"))
                 .isEqualTo("{app_name=\"apisix\"} |~ \"(?i)c:\\\\\\\\temp\"");
+    }
+
+    // --- forced namespace ----------------------------------------------------------
+
+    @Test
+    void buildPipeline_pinsTheDefaultSelectorToTheConfiguredNamespace() {
+        assertThat(pinnedTo("acceptance", "namespace").buildPipeline(null, null))
+                .isEqualTo("{namespace=\"acceptance\", app_name=\"apisix\"}");
+    }
+
+    @Test
+    void buildPipeline_pinsAndKeepsTheSearchFilter() {
+        assertThat(pinnedTo("acceptance", "namespace").buildPipeline(null, "timeout"))
+                .isEqualTo("{namespace=\"acceptance\", app_name=\"apisix\"} |~ \"(?i)timeout\"");
+    }
+
+    /**
+     * The point of doing this in buildPipeline rather than in DEFAULT_SELECTOR: ?query=
+     * replaces the selector outright, so a caller asking for another namespace still gets
+     * the configured one ANDed in - which matches nothing rather than that namespace.
+     */
+    @Test
+    void buildPipeline_pinsACallerSuppliedSelectorToo() {
+        assertThat(pinnedTo("acceptance", "namespace").buildPipeline("{namespace=\"other\"}", null))
+                .isEqualTo("{namespace=\"acceptance\", namespace=\"other\"}");
+        assertThat(pinnedTo("acceptance", "namespace").buildPipeline("{app_name=\"apisix\"} |= \"boom\"", null))
+                .isEqualTo("{namespace=\"acceptance\", app_name=\"apisix\"} |= \"boom\"");
+    }
+
+    @Test
+    void buildPipeline_pinsAnEmptyCallerSelectorWithoutLeavingAStrayComma() {
+        assertThat(pinnedTo("acceptance", "namespace").buildPipeline("{}", null))
+                .isEqualTo("{namespace=\"acceptance\"}");
+    }
+
+    @Test
+    void buildPipeline_usesTheConfiguredLabelName() {
+        assertThat(pinnedTo("acceptance", "kubernetes_namespace").buildPipeline(null, null))
+                .isEqualTo("{kubernetes_namespace=\"acceptance\", app_name=\"apisix\"}");
+    }
+
+    /** A brace inside a line filter is text, not the end of the selector. */
+    @Test
+    void buildPipeline_ignoresBracesInsideStringLiterals() {
+        assertThat(pinnedTo("acceptance", "namespace").buildPipeline("{app_name=\"apisix\"} |= \"{\"", null))
+                .isEqualTo("{namespace=\"acceptance\", app_name=\"apisix\"} |= \"{\"");
+    }
+
+    /**
+     * Only the first selector would get the matcher, so a query holding two is refused
+     * rather than served with half of it pinned.
+     */
+    @Test
+    void buildPipeline_rejectsASecondStreamSelector() {
+        assertThatThrownBy(() -> pinnedTo("acceptance", "namespace")
+                .buildPipeline("{app_name=\"apisix\"} or {app_name=\"other\"}", null))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("single stream selector");
+    }
+
+    @Test
+    void buildPipeline_rejectsAQueryWithNoStreamSelector() {
+        assertThatThrownBy(() -> pinnedTo("acceptance", "namespace").buildPipeline("app_name=\"apisix\"", null))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("stream selector");
+    }
+
+    @Test
+    void buildPipeline_leavesTheQueryAloneWhenNoNamespaceIsConfigured() {
+        // and in particular does not reject the selector-less queries the check above would
+        assertThat(logsService.buildPipeline("nonsense", null)).isEqualTo("nonsense");
+    }
+
+    @Test
+    void countLogs_countsWithinTheForcedNamespace() {
+        when(lokiClient.instantQuery(anyString(), any())).thenReturn(vector("3"));
+
+        assertThat(pinnedTo("acceptance", "namespace").countLogs(null, null, null).query())
+                .startsWith("sum(count_over_time({namespace=\"acceptance\", app_name=\"apisix\"}[");
+    }
+
+    @Test
+    void getRecentLogs_queriesLokiWithinTheForcedNamespace() {
+        lokiReturns(streams());
+
+        pinnedTo("acceptance", "namespace").getRecentLogs(null, null, null, null, null);
+
+        verify(lokiClient).queryRange(eq("{namespace=\"acceptance\", app_name=\"apisix\"}"),
+                anyLong(), anyLong(), anyInt(), anyString());
     }
 
     @Test

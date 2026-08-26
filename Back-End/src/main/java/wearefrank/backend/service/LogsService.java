@@ -2,6 +2,7 @@ package wearefrank.backend.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -47,10 +48,24 @@ public class LogsService {
 
     private final LokiClient lokiClient;
     private final ObjectMapper objectMapper;
+    private final String namespace;
+    private final String namespaceLabel;
 
-    public LogsService(LokiClient lokiClient, ObjectMapper objectMapper) {
+    public LogsService(LokiClient lokiClient, ObjectMapper objectMapper,
+                       // Every query this service builds gets pinned to this namespace, the
+                       // caller's own selector included - see buildPipeline. Empty means no
+                       // pinning, which is what a single-tenant Loki wants.
+                       @Value("${LOKI_NAMESPACE:}") String namespace,
+                       // Which label carries it. "namespace" is what the gateway's
+                       // loki-logger pushes (config/apisix.yaml) and what a Kubernetes
+                       // service-discovery scrape produces; some collectors relabel it to
+                       // kubernetes_namespace instead.
+                       @Value("${LOKI_NAMESPACE_LABEL:namespace}") String namespaceLabel) {
         this.lokiClient = lokiClient;
         this.objectMapper = objectMapper;
+        this.namespace = namespace == null ? "" : namespace.trim();
+        this.namespaceLabel = (namespaceLabel == null || namespaceLabel.isBlank())
+                ? "namespace" : namespaceLabel.trim();
     }
 
     // raw passthrough, same contract as prometheusRangeQuery:
@@ -214,10 +229,78 @@ public class LogsService {
      */
     String buildPipeline(String query, String search) {
         String selector = (query != null && !query.isBlank()) ? query.trim() : DEFAULT_SELECTOR;
+        selector = forceNamespace(selector);
         if (search == null || search.isBlank()) {
             return selector;
         }
         return selector + " |~ \"(?i)" + logqlString(regexEscape(search.trim())) + "\"";
+    }
+
+    /**
+     * Pins the selector to the configured namespace by adding the label matcher to it.
+     * Matchers inside a selector are ANDed, so this can only ever narrow what comes back -
+     * a caller asking for another namespace gets an empty result rather than that
+     * namespace's lines.
+     *
+     * Done here rather than by prefixing DEFAULT_SELECTOR, because ?query= lets the caller
+     * replace the selector outright; a default the caller can drop is not a filter.
+     *
+     * No-op when LOKI_NAMESPACE is empty, which is the single-tenant case.
+     */
+    private String forceNamespace(String selector) {
+        if (namespace.isEmpty()) {
+            return selector;
+        }
+        int[] braces = selectorBraces(selector);
+        int open = braces[0];
+        int close = braces[1];
+        String existing = selector.substring(open + 1, close).trim();
+        String forced = namespaceLabel + "=\"" + logqlString(namespace) + "\"";
+        return selector.substring(0, open + 1)
+                + (existing.isEmpty() ? forced : forced + ", " + existing)
+                + selector.substring(close);
+    }
+
+    /**
+     * Positions of the stream selector's braces, skipping any that sit inside a string
+     * literal - {@code {app_name="apisix"} |= "{"} has three braces and only two of them
+     * delimit the selector.
+     *
+     * A caller query holding a second selector is rejected instead of being half-pinned:
+     * this only ever edits one of them, so a two-selector query would come back with the
+     * namespace enforced on the first and wide open on the second.
+     */
+    private int[] selectorBraces(String selector) {
+        int open = -1;
+        int close = -1;
+        char quote = 0;
+        for (int i = 0; i < selector.length(); i++) {
+            char c = selector.charAt(i);
+            if (quote != 0) {
+                // Backticks are LogQL's raw strings: no escapes inside them, so a backslash
+                // there is just a backslash and cannot hide the closing backtick.
+                if (c == '\\' && quote == '"') {
+                    i++;
+                } else if (c == quote) {
+                    quote = 0;
+                }
+            } else if (c == '"' || c == '`') {
+                quote = c;
+            } else if (c == '{') {
+                if (open >= 0) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "query must hold a single stream selector while LOKI_NAMESPACE is set");
+                }
+                open = i;
+            } else if (c == '}' && open >= 0 && close < 0) {
+                close = i;
+            }
+        }
+        if (open < 0 || close < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "query must contain a stream selector, e.g. {app_name=\"apisix\"}");
+        }
+        return new int[]{open, close};
     }
 
     // Loki runs Go's RE2, which has no \Q...\E, so the metacharacters are escaped by hand.
