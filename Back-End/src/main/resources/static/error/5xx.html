@@ -1,0 +1,142 @@
+<!doctype html>
+<!--
+  Served by Spring Boot for any 5xx that reaches the browser as HTML, in place of the
+  Whitelabel Error Page. DefaultErrorViewResolver looks for error/<status> then
+  error/<series>xx under the static locations, so this one file covers 500, 502, 503.
+
+  Static, so there is no model to render: no status code, no timestamp, no stack trace.
+  That is the point - a 5xx means something in the console threw, and the only honest
+  thing to tell a browser is where the detail actually lives. Anything more specific
+  belongs in the log, not on a page any visitor can load.
+
+  Self-contained on purpose. This page has to render when the SPA bundle is exactly what
+  is broken, so it links no stylesheet, no script and no font.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Something went wrong - Frank!Gateway</title>
+    <script>
+      // Same bootstrap as index.html, so an error keeps the theme the user picked.
+      (function(){
+        try{
+          var t = localStorage.getItem('theme');
+          if(t){ document.documentElement.setAttribute('data-theme', t); }
+        }catch(e){}
+      })();
+    </script>
+    <style>
+        :root {
+            color-scheme: light dark;
+            --bg-color:       light-dark(#f8f9fa, #1e1e1e);
+            --bg-secondary:   light-dark(#ffffff, #252525);
+            --bg-tertiary:    light-dark(#f1f3f5, #2d2d2d);
+            --text-primary:   light-dark(#212529, #eeeeee);
+            --text-secondary: light-dark(#495057, #aaaaaa);
+            --border-dim:     light-dark(rgba(255, 202, 29, 0.15), rgba(253, 195, 0, 0.3));
+            --accent-color:   #FDC300;
+            --error-color:    light-dark(#dc3545, #ff6b6b);
+            --shadow-sm: 0 2px 4px light-dark(rgba(178, 137, 0, 0.25), rgba(253, 195, 0, 0.25)),
+                         0 0   8px light-dark(rgba(178, 137, 0, 0.15), rgba(253, 195, 0, 0.15));
+        }
+
+        [data-theme="light"] { color-scheme: light; }
+        [data-theme="dark"]  { color-scheme: dark; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1rem;
+            box-sizing: border-box;
+            background: var(--bg-color);
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            line-height: 1.5;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 32rem;
+            padding: 2rem;
+            border: 1px solid var(--border-dim);
+            border-radius: 8px;
+            background: var(--bg-secondary);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .brand { margin: 0 0 1.5rem; font-size: 1.5rem; }
+        .brand span { color: var(--accent-color); }
+
+        h2 { margin: 0 0 0.75rem; font-size: 1.125rem; color: var(--error-color); }
+
+        p { margin: 0 0 1rem; font-size: 0.875rem; color: var(--text-secondary); }
+
+        dl {
+            margin: 0 0 1.5rem;
+            padding: 0.75rem 0.875rem;
+            border-radius: 4px;
+            background: var(--bg-tertiary);
+            font-size: 0.8125rem;
+        }
+
+        dt { color: var(--text-secondary); }
+
+        dd {
+            margin: 0 0 0.5rem;
+            /* A long URL must not push the card wider than the viewport. */
+            overflow-wrap: anywhere;
+        }
+
+        dd:last-child { margin-bottom: 0; }
+
+        a {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--accent-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            text-decoration: none;
+        }
+
+        a:hover { background: var(--accent-color); color: #212529; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1 class="brand"><span>Frank<b>!</b></span>Gateway</h1>
+
+    <h2>Something went wrong</h2>
+    <p>
+        The console hit an unexpected error while handling this request. Nothing you can
+        do in the browser will fix it - the request never got far enough to say what it
+        was trying to do.
+    </p>
+    <p>
+        The stack trace is in the console's own server log. If you are running it in
+        Kubernetes, that is <code>kubectl logs</code> against the console pod; the entry
+        is logged at ERROR by <code>dispatcherServlet</code> at the time below.
+    </p>
+
+    <dl>
+        <dt>Request</dt>
+        <dd id="url">-</dd>
+        <dt>Time</dt>
+        <dd id="time">-</dd>
+    </dl>
+
+    <a href="/">Back to the console</a>
+</div>
+
+<script>
+  // Filled in here rather than server-side: a static error page gets no model. The
+  // browser knows both, and they are what makes the log entry findable.
+  document.getElementById('url').textContent = window.location.href;
+  document.getElementById('time').textContent = new Date().toISOString();
+</script>
+</body>
+</html>

@@ -1,0 +1,126 @@
+<!doctype html>
+<!--
+  The 4xx half of the pair - see 5xx.html, which carries the reasoning for both. Split
+  from it because the two need opposite advice: a 5xx is the console's problem and the
+  detail is in its log, a 4xx is about this request and there is nothing in the log to
+  go and read.
+
+  Reached less often than it looks. A missing page is not a 404 here: WebConfig's resolver
+  falls back to index.html so the SPA can route it, and an unauthenticated page request is
+  a redirect to /login rather than a 403. What lands here is mostly a wrong method or a
+  forbidden path typed by hand.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Request not accepted - Frank!Gateway</title>
+    <script>
+      (function(){
+        try{
+          var t = localStorage.getItem('theme');
+          if(t){ document.documentElement.setAttribute('data-theme', t); }
+        }catch(e){}
+      })();
+    </script>
+    <style>
+        :root {
+            color-scheme: light dark;
+            --bg-color:       light-dark(#f8f9fa, #1e1e1e);
+            --bg-secondary:   light-dark(#ffffff, #252525);
+            --bg-tertiary:    light-dark(#f1f3f5, #2d2d2d);
+            --text-primary:   light-dark(#212529, #eeeeee);
+            --text-secondary: light-dark(#495057, #aaaaaa);
+            --border-dim:     light-dark(rgba(255, 202, 29, 0.15), rgba(253, 195, 0, 0.3));
+            --accent-color:   #FDC300;
+            --warning-color:  light-dark(#ffc107, #f39c12);
+            --shadow-sm: 0 2px 4px light-dark(rgba(178, 137, 0, 0.25), rgba(253, 195, 0, 0.25)),
+                         0 0   8px light-dark(rgba(178, 137, 0, 0.15), rgba(253, 195, 0, 0.15));
+        }
+
+        [data-theme="light"] { color-scheme: light; }
+        [data-theme="dark"]  { color-scheme: dark; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1rem;
+            box-sizing: border-box;
+            background: var(--bg-color);
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            line-height: 1.5;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 32rem;
+            padding: 2rem;
+            border: 1px solid var(--border-dim);
+            border-radius: 8px;
+            background: var(--bg-secondary);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .brand { margin: 0 0 1.5rem; font-size: 1.5rem; }
+        .brand span { color: var(--accent-color); }
+
+        h2 { margin: 0 0 0.75rem; font-size: 1.125rem; color: var(--warning-color); }
+
+        p { margin: 0 0 1rem; font-size: 0.875rem; color: var(--text-secondary); }
+
+        dl {
+            margin: 0 0 1.5rem;
+            padding: 0.75rem 0.875rem;
+            border-radius: 4px;
+            background: var(--bg-tertiary);
+            font-size: 0.8125rem;
+        }
+
+        dt { color: var(--text-secondary); }
+
+        dd {
+            margin: 0;
+            overflow-wrap: anywhere;
+        }
+
+        a {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--accent-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            text-decoration: none;
+        }
+
+        a:hover { background: var(--accent-color); color: #212529; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1 class="brand"><span>Frank<b>!</b></span>Gateway</h1>
+
+    <h2>That request was not accepted</h2>
+    <p>
+        The console understood the request and turned it down - the address does not
+        exist, the method is not allowed on it, or your account may not reach it. Signing
+        in again will not change the answer.
+    </p>
+
+    <dl>
+        <dt>Request</dt>
+        <dd id="url">-</dd>
+    </dl>
+
+    <a href="/">Back to the console</a>
+</div>
+
+<script>
+  document.getElementById('url').textContent = window.location.href;
+</script>
+</body>
+</html>
