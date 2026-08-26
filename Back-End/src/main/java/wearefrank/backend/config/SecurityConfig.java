@@ -38,8 +38,8 @@ public class SecurityConfig {
                     "No authenticator for console.security.auth.type. Set it to OIDC or IN_MEMORY.");
         }
 
-        CsrfTokenRequestAttributeHandler csrfHandler = new CsrfTokenRequestAttributeHandler();
-        csrfHandler.setCsrfRequestAttributeName(null);
+//        CsrfTokenRequestAttributeHandler csrfHandler = new CsrfTokenRequestAttributeHandler();
+//        csrfHandler.setCsrfRequestAttributeName(null);
 
         // Only remember page navigations. Without this an XHR that hits the 401 entry point
         // gets saved and replayed as the post-login redirect, dumping the user on a JSON endpoint.
@@ -65,12 +65,12 @@ public class SecurityConfig {
                         // redirect back to the login page, which is a loop rather than an answer.
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())
-                .csrf(csrf -> csrf
-                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
-                        .csrfTokenRequestHandler(csrfHandler))
+//                .csrf(csrf -> csrf
+//                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+//                        .csrfTokenRequestHandler(csrfHandler))
 
                 .exceptionHandling(ex -> ex.defaultAuthenticationEntryPointFor(
-                        new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
+                        new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED), // TODO: create better error showcase
                         pathPattern("/api/**")))
                 .requestCache(cache -> cache.requestCache(requestCache));
 
