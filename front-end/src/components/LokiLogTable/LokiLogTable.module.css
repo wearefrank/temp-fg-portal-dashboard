@@ -1,5 +1,16 @@
 .fullWidthCard {
     grid-column: 1 / -1;
+    /* Breaks out of .container's 1200px cap (index.css). A log row is a dozen wide text
+       columns - path, message, upstream - and the cap leaves most of a wide screen unused
+       while Message is still clipped. Capped again so it stops short of unreadable line
+       lengths on an ultrawide, and held clear of the scrollbar.
+
+       margin-left centres against the grid area, the translate against the card's own
+       width, so the pair stays centred at any viewport without a media query. */
+    box-sizing: border-box;
+    width: min(1800px, calc(100vw - 3rem));
+    margin-left: 50%;
+    transform: translateX(-50%);
 }
 
 .emptyHint {
@@ -11,14 +22,98 @@
 .tableArea {
     max-height: 420px;
     overflow: auto;
+    transition: opacity 0.15s ease;
+}
+
+/* Fades the previous page while the one that was clicked loads. Not used for background
+   refreshes. */
+.tableAreaBusy {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* A sweep, not a percentage - nothing here knows how far along a Loki query is. */
+@keyframes progressSlide {
+    0% { background-position: -60% 0; }
+    100% { background-position: 160% 0; }
+}
+
+.progressBar {
+    height: 2px;
+    margin-top: 0.4rem;
+    border-radius: 1px;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        var(--color-primary, #3b82f6) 50%,
+        transparent 100%
+    );
+    background-size: 40% 100%;
+    background-repeat: no-repeat;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.progressBarActive {
+    opacity: 1;
+    animation: progressSlide 1.1s linear infinite;
+}
+
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+.skeletonCell {
+    display: inline-block;
+    width: 70%;
+    height: 12px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border-dim) 50%, var(--bg-secondary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .progressBarActive,
+    .skeletonCell {
+        animation: none;
+    }
 }
 
 .controls {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.5rem;
     margin: 0.75rem 0 0.25rem;
+}
+
+/**
+ * One height, one type size and one background for every control in the row.
+ *
+ * They had each been padded to their own size - four different paddings and three font
+ * sizes between the time picker, the search box, the buttons and the page-size select - so
+ * the row read as a line of boxes that nearly lined up. Height rather than padding, with
+ * border-box, because a button is content-box by default and would otherwise sit taller
+ * than the inputs by exactly its padding.
+ *
+ * TimeRangePicker's trigger matches these numbers by hand in its own module: it is the one
+ * control here that comes from elsewhere, and nothing else in the app uses it.
+ */
+.controls .search,
+.controls .pageSize,
+.controls .toolbarBtn {
+    box-sizing: border-box;
+    height: 1.9rem;
+    font-size: 0.82rem;
+    font-family: inherit;
+    color: inherit;
+    /* --input-bg, not --bg-primary: that one is defined nowhere, so the declaration was
+       invalid and every field in this row fell back to transparent. */
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
 }
 
 .searchWrap {
@@ -29,18 +124,58 @@
 
 .search {
     width: 100%;
-    padding: 0.35rem 1.9rem 0.35rem 0.6rem;
-    font-size: 0.85rem;
-    font-family: inherit;
-    color: inherit;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
+    /* Room on the right for the clear button that sits over it. */
+    padding: 0 1.9rem 0 0.6rem;
 }
 
 .search:focus {
     outline: none;
     border-color: var(--color-primary, #3b82f6);
+}
+
+/* Buttons in the toolbar row - Columns, and one per namespace. */
+.toolbarBtn {
+    padding: 0 0.55rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.controls .toolbarBtn:hover {
+    background: var(--bg-tertiary);
+}
+
+/* The namespace being filtered to. Also on :hover, so the selected one does not flicker
+   back to the plain background when the pointer crosses it. */
+.controls .toolbarBtnActive,
+.controls .toolbarBtnActive:hover {
+    background: var(--color-primary, #3b82f6);
+    border-color: var(--color-primary, #3b82f6);
+    color: #fff;
+    font-weight: 600;
+}
+
+/* Held tight together so the label and its namespaces read as one switch rather than as
+   loose buttons scattered along the row. */
+.namespaceFilter {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    /* Sits closer to its own label than the toolbar's 0.5rem gap puts it to the controls
+       either side, so the label is read as belonging to these buttons and not to the
+       search box next to them. No border around the group: it would nest a box inside the
+       buttons and stand taller than the row's shared control height. */
+    margin-right: 0.25rem;
+}
+
+/* Names the group. Muted and small: it is a label, not another thing to click, and it
+   should not compete with the namespace it sits in front of. */
+.namespaceLabel {
+    margin-right: 0.15rem;
+    font-size: 0.72rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    white-space: nowrap;
 }
 
 .clearSearch {
@@ -252,6 +387,25 @@
     color: var(--text-secondary);
 }
 
+/* Pushed to the far end of the pager row so it is not where the next page click lands. */
+.newLinesBadge {
+    margin-left: auto;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.78rem;
+    font-family: inherit;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-primary, #3b82f6);
+    background: transparent;
+    border: 1px solid var(--color-primary, #3b82f6);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.newLinesBadge:hover {
+    color: #fff;
+    background: var(--color-primary, #3b82f6);
+}
+
 .columnsMenuWrap {
     position: relative;
 }
@@ -286,14 +440,12 @@
     background: var(--bg-tertiary);
 }
 
+/* Metrics come from the shared toolbar rule above; only the width behaviour is its own -
+   the global select rule in index.css sets width:100%, which in a flex row would let it
+   claim a share of the space the search box should have. */
 .pageSize {
-    padding: 0.25rem 0.4rem;
-    font-size: 0.82rem;
-    font-family: inherit;
-    color: inherit;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
+    width: auto;
+    padding: 0 0.4rem;
 }
 
 /* The sortable header is a button so it is reachable by keyboard, but it has to keep

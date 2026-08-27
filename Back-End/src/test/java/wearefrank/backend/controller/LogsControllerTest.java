@@ -6,6 +6,9 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import wearefrank.backend.dto.LogEntryDto;
+import wearefrank.backend.dto.LogFieldDto;
+import wearefrank.backend.dto.LogFieldType;
+import wearefrank.backend.dto.MessageVolumeDto;
 import wearefrank.backend.service.LogsService;
 
 import java.util.List;
@@ -111,7 +114,17 @@ class LogsControllerTest {
         mockMvc.perform(get("/api/logs/page").param("type", "error").param("page", "2"))
                 .andExpect(status().isOk());
 
-        verify(logsService).getPage("error", null, null, null, null, 2, null, null);
+        verify(logsService).getPage("error", null, null, null, null, 2, null, null, null);
+    }
+
+    @Test
+    void getPage_passesTheSortThrough() throws Exception {
+        mockMvc.perform(get("/api/logs/page")
+                        .param("sort", "status")
+                        .param("direction", "forward"))
+                .andExpect(status().isOk());
+
+        verify(logsService).getPage(null, null, null, null, null, null, null, "forward", "status");
     }
 
     @Test
@@ -120,6 +133,67 @@ class LogsControllerTest {
                 .andExpect(status().isOk());
 
         verify(logsService).countLogs("error", null, null, null);
+    }
+
+    @Test
+    void messageVolume_returnsBothWindowsAndTheChange() throws Exception {
+        when(logsService.messageVolume(null, null, null, null))
+                .thenReturn(new MessageVolumeDto(900, 600, 50.0, 604800, "sum(count_over_time({}[604800s]))"));
+
+        mockMvc.perform(get("/api/logs/volume"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current").value(900))
+                .andExpect(jsonPath("$.previous").value(600))
+                .andExpect(jsonPath("$.changePercent").value(50.0))
+                .andExpect(jsonPath("$.windowSeconds").value(604800));
+    }
+
+    /**
+     * The UI branches on this being null to draw "no comparison" rather than a 100% drop,
+     * so it has to arrive as null and not as a zero.
+     */
+    @Test
+    void messageVolume_serialisesAnAbsentChangeAsNull() throws Exception {
+        when(logsService.messageVolume(null, null, null, null))
+                .thenReturn(new MessageVolumeDto(900, 0, null, 604800, "sum(count_over_time({}[604800s]))"));
+
+        mockMvc.perform(get("/api/logs/volume"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current").value(900))
+                .andExpect(jsonPath("$.changePercent").isEmpty());
+    }
+
+    @Test
+    void messageVolume_passesTypeAndWindowThrough() throws Exception {
+        when(logsService.messageVolume("error", null, null, 3600L))
+                .thenReturn(new MessageVolumeDto(2, 1, 100.0, 3600, "sum(count_over_time({}[3600s]))"));
+
+        mockMvc.perform(get("/api/logs/volume")
+                        .param("type", "error")
+                        .param("windowSeconds", "3600"))
+                .andExpect(status().isOk());
+
+        verify(logsService).messageVolume("error", null, null, 3600L);
+    }
+
+    @Test
+    void getFields_passesTheTypeThroughAndReturnsTheDescriptors() throws Exception {
+        when(logsService.describeFields("error")).thenReturn(List.of(
+                new LogFieldDto("message", "Message", LogFieldType.MESSAGE, true, null),
+                new LogFieldDto("latencyMs", "Latency", LogFieldType.DURATION, false, "right")));
+
+        mockMvc.perform(get("/api/logs/fields").param("type", "error"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value("message"))
+                .andExpect(jsonPath("$[0].label").value("Message"))
+                .andExpect(jsonPath("$[0].type").value("MESSAGE"))
+                .andExpect(jsonPath("$[0].defaultVisible").value(true))
+                // The dashboard reads this as a nullable value, so it has to arrive as null
+                // rather than be dropped from the object.
+                .andExpect(jsonPath("$[0].align").isEmpty())
+                .andExpect(jsonPath("$[1].align").value("right"));
+
+        verify(logsService).describeFields("error");
     }
 
     @Test

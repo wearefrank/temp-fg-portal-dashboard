@@ -113,6 +113,16 @@ class MetricsControllerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void getLiveServices_returns200WithParsedObject() throws Exception {
+        when(metricsService.getLiveServices()).thenReturn(List.of(Map.of("id", "s1")));
+
+        mockMvc.perform(get("/api/metrics/services"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value("s1"));
+    }
+
+    @Test
     void getPrometheusHealth_returnsTrue_whenPrometheusIsReachable() throws Exception {
         when(metricsService.isPrometheusHealthy()).thenReturn(true);
 

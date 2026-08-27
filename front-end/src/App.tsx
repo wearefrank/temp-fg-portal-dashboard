@@ -1,6 +1,6 @@
 import {Routes, Route, Outlet} from 'react-router-dom';
 import {Dashboard} from "./components/Dashboard/Dashboard.tsx";
-import {Config} from "./pages/config/Config.tsx";
+// import {Config} from "./pages/config/Config.tsx";
 // import {ConfigDesigner} from "./pages/configDesigner/ConfigDesigner.tsx";
 // import {DesignerSettingsPage} from "./pages/configDesigner/DesignerSettingsPage.tsx";
 // import YamlEditor from "./pages/yamlEditor/YamlEditor.tsx";
@@ -32,7 +32,7 @@ function App() {
             <Route element={<AuthenticatedLayout/>}>
                 <Route path="/" element={<Dashboard/>} />
                 <Route path="/dashboard" element={<Dashboard/>} />
-                <Route path="/config" element={<Config/>} />
+                {/*<Route path="/config" element={<Config/>} />*/}
                 {/*<Route path="/designer" element={<ConfigDesigner/>} />*/}
                 {/*<Route path="/designer/settings" element={<DesignerSettingsPage/>} />*/}
                 {/*<Route path="/yamlEditor" element={<YamlEditor/>} />*/}

@@ -81,9 +81,9 @@ export const Header: React.FC = () => {
           {/*<NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : undefined)}>*/}
           {/*  History*/}
           {/*</NavLink>*/}
-          <NavLink to="/config" className={({ isActive }) => (isActive ? 'active' : undefined)}>
-            Config
-          </NavLink>
+          {/*<NavLink to="/config" className={({ isActive }) => (isActive ? 'active' : undefined)}>*/}
+          {/*  Config*/}
+          {/*</NavLink>*/}
           {/*<NavLink to="/designer" className={({ isActive }) => (isActive ? 'active' : undefined)}>*/}
           {/*  Config Designer*/}
           {/*</NavLink>*/}

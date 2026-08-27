@@ -59,4 +59,9 @@ public class MetricsController {
     public List<Object> getLiveUpstreams() {
         return metricsService.getLiveUpstreams();
     }
+
+    @GetMapping("/services")
+    public List<Object> getLiveServices() {
+        return metricsService.getLiveServices();
+    }
 }

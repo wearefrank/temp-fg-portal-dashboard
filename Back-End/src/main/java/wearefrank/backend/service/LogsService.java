@@ -8,13 +8,23 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import wearefrank.backend.dto.LogCountDto;
 import wearefrank.backend.dto.LogEntryDto;
+import wearefrank.backend.dto.LogField;
+import wearefrank.backend.dto.LogFieldDto;
+import wearefrank.backend.dto.LogFieldType;
+import wearefrank.backend.dto.LogFields;
 import wearefrank.backend.dto.LogKind;
 import wearefrank.backend.dto.LogPageDto;
+import wearefrank.backend.dto.LogSort;
+import wearefrank.backend.dto.MessageVolumeDto;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * The logs equivalent of {@link MetricsService}'s Prometheus half: resolves the query
@@ -32,9 +42,10 @@ public class LogsService {
     // Loki's own default cap is 5000; staying well under it keeps a mistyped limit from
     // pulling a week of traffic into the browser.
     private static final int MAX_LIMIT = 1000;
-    // What startTime=0 resolves to. Loki has no equivalent of Prometheus' TSDB min-time
-    // endpoint, and config/loki.yaml drops anything older than this anyway.
-    private static final long RETENTION_SECONDS = 7 * 24 * 3600L;
+    /** Fallback retention when LOKI_RETENTION_HOURS is unset: 336h, two weeks. */
+    private static final long DEFAULT_RETENTION_HOURS = 336L;
+    /** Default comparison window for {@link #messageVolume}. */
+    private static final long WEEK_SECONDS = 7 * 24 * 3600L;
     private static final long NANOS_PER_SECOND = 1_000_000_000L;
     /**
      * Loki refuses a query asking for more than this (max_entries_limit_per_query, and its
@@ -48,6 +59,7 @@ public class LogsService {
     private final ObjectMapper objectMapper;
     private final List<String> namespaces;
     private final String namespaceLabel;
+    private final long retentionSeconds;
 
     public LogsService(LokiClient lokiClient, ObjectMapper objectMapper,
                        // Every query this service builds gets pinned to these namespaces, the
@@ -60,12 +72,26 @@ public class LogsService {
                        // loki-logger pushes (config/apisix.yaml) and what a Kubernetes
                        // service-discovery scrape produces; some collectors relabel it to
                        // kubernetes_namespace instead.
-                       @Value("${LOKI_NAMESPACE_LABEL:namespace}") String namespaceLabel) {
+                       @Value("${LOKI_NAMESPACE_LABEL:namespace}") String namespaceLabel,
+                       // What startTime=0 resolves to, in hours - Loki has no equivalent of
+                       // Prometheus' TSDB min-time endpoint, so the console has to be told
+                       // how far back asking for "everything" is worth reaching. Match it to
+                       // retention_period on the Loki being queried.
+                       //
+                       // The two failure directions are not symmetric. Set longer than the
+                       // real retention, a query merely widens over lines already deleted,
+                       // which costs nothing and returns the same rows. Set shorter, "all"
+                       // silently stops short of data Loki still holds - so when the real
+                       // value is unknown, guess high.
+                       @Value("${LOKI_RETENTION_HOURS:" + DEFAULT_RETENTION_HOURS + "}") long retentionHours) {
         this.lokiClient = lokiClient;
         this.objectMapper = objectMapper;
         this.namespaces = parseNamespaces(namespace);
         this.namespaceLabel = (namespaceLabel == null || namespaceLabel.isBlank())
                 ? "namespace" : namespaceLabel.trim();
+        // A non-positive setting would make startTime=0 resolve to an empty or inverted
+        // window - "all" returning nothing at all - so it falls back rather than obeying.
+        this.retentionSeconds = (retentionHours > 0 ? retentionHours : DEFAULT_RETENTION_HOURS) * 3600L;
     }
 
     /**
@@ -110,6 +136,17 @@ public class LogsService {
                                            String endCursor, Integer limit) {
         String body = logRangeQuery(type, query, search, startTime, endCursor, limit, "backward");
         return parseStreams(body, resolveLimit(limit));
+    }
+
+    /**
+     * The columns a table of this kind should draw, in order - see {@link LogFields}.
+     *
+     * Answers about the shape of a line rather than about any lines, so it touches Loki not
+     * at all; the kind still goes through {@link #resolveKind} so a typo is the same 400
+     * here as everywhere else.
+     */
+    public List<LogFieldDto> describeFields(String type) {
+        return LogFields.describe(resolveKind(type));
     }
 
     /**
@@ -165,19 +202,83 @@ public class LogsService {
         // stays put while the user clicks through it.
         long end = anchorNanos != null ? anchorNanos / NANOS_PER_SECOND : now;
         long start = resolveStart(startTime, now);
-        // count_over_time needs a range, and it has to match the window the table shows or
-        // the total describes a different slice of time than the rows underneath it.
-        String logql = "sum(count_over_time(" + buildPipeline(kind, query, search) + "[" + (end - start) + "s]))";
-        String body = lokiClient.instantQuery(logql, anchorNanos);
+        return countBetween(kind, query, search, start, end, anchorNanos);
+    }
+
+    /**
+     * The count itself, over an explicit span.
+     *
+     * count_over_time needs a range and an evaluation point rather than two absolute ends,
+     * so the span is expressed as a range of (end - start) seconds evaluated at end. Split
+     * out of countLogs because the week-over-week panel needs a window that does not end at
+     * now, which the startTime-shaped signature above cannot express.
+     *
+     * @param evalNanos where to evaluate, or null for now. Must agree with {@code endSec}:
+     *                  a range measured from one instant and evaluated at another counts a
+     *                  different span than the one asked for.
+     */
+    private LogCountDto countBetween(LogKind kind, String query, String search,
+                                     long startSec, long endSec, Long evalNanos) {
+        String logql = "sum(count_over_time(" + buildPipeline(kind, query, search) + "[" + (endSec - startSec) + "s]))";
+        String body = lokiClient.instantQuery(logql, evalNanos);
         try {
             JsonNode result = objectMapper.readTree(body).path("data").path("result");
             // An empty vector means nothing matched, which is a count of zero rather than
             // an error - a fresh Loki with no traffic yet answers exactly this way.
             long count = result.isEmpty() ? 0L : (long) result.get(0).path("value").get(1).asDouble();
-            return new LogCountDto(count, logql);
+            return new LogCountDto(count, logql, endSec - startSec);
         } catch (Exception e) {
             throw new RuntimeException("Failed to parse Loki count response: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * This window against the one before it - a week against the previous week, by default.
+     *
+     * The two spans are adjacent and disjoint: the current one covers (now-w, now] and the
+     * previous one (now-2w, now-w]. That is done by evaluating the previous count at the
+     * boundary rather than at now, because count_over_time has no offset of its own - asking
+     * for [2w] and subtracting would count the boundary line into both halves.
+     *
+     * Two round trips rather than one range query with a 1w step: a range query would hand
+     * back buckets aligned to Loki's own step boundaries, not to "the last seven days", and
+     * the panel would silently compare two spans of unequal length.
+     */
+    public MessageVolumeDto messageVolume(String type, String query, String search, Long windowSeconds) {
+        LogKind kind = resolveKind(type);
+        long window = resolveVolumeWindow(windowSeconds);
+        long now = System.currentTimeMillis() / 1000;
+        long boundary = now - window;
+
+        LogCountDto currentCount = countBetween(kind, query, search, boundary, now, null);
+        LogCountDto previousCount = countBetween(kind, query, search,
+                boundary - window, boundary, boundary * NANOS_PER_SECOND);
+
+        long current = currentCount.count();
+        long previous = previousCount.count();
+        // Null rather than a number when there is nothing to compare against. A previous
+        // window of zero is not a -100%/+infinity story, and it is exactly what a window
+        // older than Loki's retention returns, so the UI has to be able to tell the two
+        // apart from a real drop to nothing.
+        Double changePercent = previous == 0
+                ? null
+                : Math.round((current - previous) * 1000.0 / previous) / 10.0;
+
+        return new MessageVolumeDto(current, previous, changePercent, window, currentCount.query());
+    }
+
+    /**
+     * Window length for the comparison. A week by default, which is what the dashboard
+     * asks for; anything non-positive is a caller mistake rather than a request for "all",
+     * since a window of zero has no previous window to sit beside.
+     */
+    private long resolveVolumeWindow(Long windowSeconds) {
+        if (windowSeconds == null) return WEEK_SECONDS;
+        if (windowSeconds <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "windowSeconds must be positive, got: " + windowSeconds);
+        }
+        return windowSeconds;
     }
 
     /**
@@ -188,9 +289,15 @@ public class LogsService {
      * page 1 over and over. So a page is cut from a single over-fetch of page*pageSize lines
      * taken newest-first, which costs one round trip and gives real random access - at the
      * price of a depth ceiling, reported as depthCapped rather than hidden.
+     *
+     * {@code sort} names the column to order by and {@code direction} which way: "forward"
+     * is ascending, anything else descending. Time is Loki's own ordering and stays on the
+     * over-fetch above; any other column is ordered here, over the whole reachable window
+     * rather than over the page - see {@code sortedPage}.
      */
     public LogPageDto getPage(String type, String query, String search, Long windowSeconds,
-                              String anchor, Integer page, Integer pageSize, String direction) {
+                              String anchor, Integer page, Integer pageSize, String direction,
+                              String sort) {
         LogKind kind = resolveKind(type);
         long now = System.currentTimeMillis() / 1000;
         long anchorNanos = resolveEndNanos(anchor, now);
@@ -199,7 +306,7 @@ public class LogsService {
         // duration rather than an absolute start is what makes that possible - the caller
         // never has to know what "now" was when paging began.
         long window = (windowSeconds == null) ? 3600L
-                : (windowSeconds == 0 ? RETENTION_SECONDS : windowSeconds);
+                : (windowSeconds == 0 ? retentionSeconds : windowSeconds);
         long startSec = (anchorNanos / NANOS_PER_SECOND) - window;
 
         int size = resolvePageSize(pageSize);
@@ -219,30 +326,70 @@ public class LogsService {
         int requested = (page == null || page < 1) ? 1 : page;
         int resolvedPage = Math.min(requested, totalPages);
 
-        // Sorting by time is Loki's `direction`, not a client-side reorder: "forward" walks
-        // the window oldest-first. Sorting the twenty-five rows already in the browser would
-        // only reorder the page, which is a different and much less useful thing.
+        // "forward" is ascending - oldest-first for time, A-Z for a text column.
         String resolvedDirection = "forward".equals(direction) ? "forward" : "backward";
+        boolean ascending = "forward".equals(resolvedDirection);
+        String resolvedSort = LogSort.resolve(sort);
 
-        int needed = resolvedPage * size;
-        String body = lokiClient.queryRange(
-                buildPipeline(kind, query, search),
-                startSec * NANOS_PER_SECOND,
-                anchorNanos, needed, resolvedDirection);
+        String pipeline = buildPipeline(kind, query, search);
+        long startNanos = startSec * NANOS_PER_SECOND;
+
+        List<LogEntryDto> entries = LogSort.isTime(resolvedSort)
+                ? timePage(pipeline, startNanos, anchorNanos, resolvedPage, size, resolvedDirection)
+                : sortedPage(pipeline, startNanos, anchorNanos, resolvedPage, size,
+                        reachablePages * size, resolvedSort, ascending);
+
+        return new LogPageDto(entries, resolvedPage, size, total, totalPages,
+                String.valueOf(anchorNanos), depthCapped, resolvedDirection, resolvedSort);
+    }
+
+    /**
+     * A page in time order, which Loki resolves itself: it fills the response from whichever
+     * end `direction` names, so the over-fetch only has to be deep enough to reach the page.
+     */
+    private List<LogEntryDto> timePage(String pipeline, long startNanos, long anchorNanos,
+                                       int page, int size, String direction) {
+        int needed = page * size;
+        String body = lokiClient.queryRange(pipeline, startNanos, anchorNanos, needed, direction);
 
         // parseStreams normalises to newest-first; for a forward page the caller asked for
         // the opposite, and the slice below has to come off the same end Loki filled from.
         List<LogEntryDto> overFetched = new ArrayList<>(parseStreams(body, needed));
-        if ("forward".equals(resolvedDirection)) {
-            java.util.Collections.reverse(overFetched);
+        if ("forward".equals(direction)) {
+            Collections.reverse(overFetched);
         }
-        List<LogEntryDto> entries = overFetched.stream()
-                .skip((long) (resolvedPage - 1) * size)
+        return slice(overFetched, page, size);
+    }
+
+    /**
+     * A page ordered by a column Loki knows nothing about.
+     *
+     * The whole reachable window is fetched and ordered here, then sliced - which is the only
+     * honest way to do it. Ordering the page instead would sort twenty-five rows and present
+     * the result as though it had sorted the window: page 2 of "slowest first" would then
+     * hold requests faster than everything on page 1.
+     *
+     * What it costs is that the over-fetch is the full depth budget on every page rather than
+     * page*pageSize, so a sorted page beyond the first is one larger Loki query. And the
+     * ordering covers what paging can reach, not what the window holds - past that ceiling
+     * depthCapped is already true, and it now means the sort is over the newest lines rather
+     * than all of them.
+     */
+    private List<LogEntryDto> sortedPage(String pipeline, long startNanos, long anchorNanos,
+                                         int page, int size, int budget, String sort, boolean ascending) {
+        // Always backward: the budget is a depth from the anchor, so the reachable window is
+        // the newest lines in it whichever way the column is being ordered.
+        String body = lokiClient.queryRange(pipeline, startNanos, anchorNanos, budget, "backward");
+        List<LogEntryDto> window = new ArrayList<>(parseStreams(body, budget));
+        window.sort(LogSort.comparator(sort, ascending));
+        return slice(window, page, size);
+    }
+
+    private List<LogEntryDto> slice(List<LogEntryDto> entries, int page, int size) {
+        return entries.stream()
+                .skip((long) (page - 1) * size)
                 .limit(size)
                 .toList();
-
-        return new LogPageDto(entries, resolvedPage, size, total, totalPages,
-                String.valueOf(anchorNanos), depthCapped, resolvedDirection);
     }
 
     private int resolvePageSize(Integer pageSize) {
@@ -253,7 +400,7 @@ public class LogsService {
 
     private long resolveStart(Long startTime, long now) {
         if (startTime == null) return now - 3600;
-        if (startTime == 0) return now - RETENTION_SECONDS;
+        if (startTime == 0) return now - retentionSeconds;
         return startTime;
     }
 
@@ -458,65 +605,100 @@ public class LogsService {
                 : auditEntry(raw.namespace(), timestamp, tsNanos, raw.line(), json);
     }
 
-    /** The loki-logger plugin's access record, flattened out of its nesting. */
+    /**
+     * The loki-logger plugin's access record, flattened out of its nesting.
+     *
+     * Which key holds what is not written here but in {@link LogFields}, so that the same
+     * declaration serves the mapping and the columns the dashboard draws.
+     */
     private LogEntryDto auditEntry(String namespace, String timestamp, String tsNanos, String line, JsonNode json) {
-        JsonNode request = json.path("request");
-        JsonNode response = json.path("response");
-        return new LogEntryDto(
-                LogKind.AUDIT.param(),
-                namespace,
-                timestamp,
-                tsNanos,
-                text(json, "level"),
-                text(json, "route_name"),
-                // The log_format nests it under audit, and also writes it at the top level.
-                // Either will do; taking both means a trimmed-down format still identifies
-                // the route.
-                firstOf(text(json.path("audit"), "route_id"), text(json, "route_id")),
-                text(request, "request_method"),
-                text(request, "request_path"),
-                text(request, "request_host"),
-                integer(response, "status"),
-                latencyMs(text(response, "upstream_latency_ms")),
-                // Production fills `source` from $http_x_forwarded_for; the compose config
-                // adds source_addr from $remote_addr because APISIX leaves the forwarded
-                // header empty on that image. Both mean the caller, so take whichever is set.
-                firstOf(text(json, "source"), text(json, "source_addr")),
-                text(response.path("upstream_endpoint"), "address"),
-                null,   // requestId - the access record carries no request id
-                null,   // module    - nothing wrote it but the plugin
-                null,   // message   - the record is the message
-                text(json, "gemeente_code"),
-                line);
+        Map<String, Object> fields = new HashMap<>();
+        for (LogField field : LogFields.ALL) {
+            if (!field.fills(LogKind.AUDIT)) continue;
+            for (String path : field.auditPaths()) {
+                String value = textAtPath(json, path);
+                // First path that resolves wins - a later one is a fallback, not an override.
+                if (value != null) {
+                    fields.put(field.id(), coerce(field.type(), value));
+                    break;
+                }
+            }
+        }
+        return entry(LogKind.AUDIT, namespace, timestamp, tsNanos, line, fields);
     }
 
     /** An nginx error line, or - when it matches nothing - its text kept as the message. */
     private LogEntryDto errorEntry(String namespace, String timestamp, String tsNanos, String line) {
-        NginxErrorLine parsed = NginxErrorLine.parse(line);
-        return new LogEntryDto(
-                LogKind.ERROR.param(),
-                namespace,
-                timestamp,
-                tsNanos,
-                parsed.level(),
-                null,   // routeName - the error log names no route
-                null,   // routeId
-                parsed.method(),
-                parsed.path(),
-                parsed.host(),
-                null,   // status    - no response was logged, this is not the access log
-                null,   // latencyMs
-                parsed.client(),
-                parsed.upstream(),
-                parsed.requestId(),
-                parsed.module(),
-                parsed.message(),
-                null,   // gemeenteCode
-                line);
+        Map<String, String> parsed = NginxErrorLine.parse(line).asMap();
+        Map<String, Object> fields = new HashMap<>();
+        for (LogField field : LogFields.ALL) {
+            if (!field.fills(LogKind.ERROR)) continue;
+            String value = parsed.get(field.errorSource());
+            if (value != null) {
+                fields.put(field.id(), coerce(field.type(), value));
+            }
+        }
+        return entry(LogKind.ERROR, namespace, timestamp, tsNanos, line, fields);
     }
 
-    private String firstOf(String preferred, String fallback) {
-        return preferred != null ? preferred : fallback;
+    /**
+     * Binds the mapped fields onto the record by name, which is why a {@link LogField}'s id
+     * has to be a component of {@link LogEntryDto} - {@code LogFieldsTest} enforces it.
+     * Anything the line did not carry is simply absent from the map and lands as null.
+     */
+    private LogEntryDto entry(LogKind kind, String namespace, String timestamp, String tsNanos,
+                              String line, Map<String, Object> fields) {
+        // The five that describe the line rather than come out of it - see LogFields.STRUCTURAL.
+        fields.put("type", kind.param());
+        fields.put("namespace", namespace);
+        fields.put("timestamp", timestamp);
+        fields.put("tsNanos", tsNanos);
+        fields.put("raw", line);
+        return objectMapper.convertValue(fields, LogEntryDto.class);
+    }
+
+    /**
+     * Turns the raw string into what the field means. The plugin interpolates every nginx
+     * variable as a string, so "$status" arrives as "200" and has to be read back out.
+     */
+    private Object coerce(LogFieldType type, String value) {
+        return switch (type) {
+            case STATUS -> integer(value);
+            case DURATION -> millis(value);
+            case LEVEL -> value.toUpperCase(Locale.ROOT);
+            default -> value;
+        };
+    }
+
+    private Integer integer(String value) {
+        try {
+            return Integer.valueOf(value.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * nginx reports response times in seconds - hence the x1000. A request that hit more
+     * than one upstream carries them comma-separated; the first served the response.
+     */
+    private Double millis(String value) {
+        try {
+            return Double.parseDouble(value.split(",")[0].trim()) * 1000;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** {@link #text} down a dot path, for the fields the log format nests. */
+    private String textAtPath(JsonNode root, String path) {
+        JsonNode node = root;
+        String rest = path;
+        for (int dot = rest.indexOf('.'); dot >= 0; dot = rest.indexOf('.')) {
+            node = node.path(rest.substring(0, dot));
+            rest = rest.substring(dot + 1);
+        }
+        return text(node, rest);
     }
 
     private String text(JsonNode node, String field) {
@@ -525,32 +707,5 @@ public class LogsService {
         String asText = value.asText();
         // nginx writes "-" for a variable that was never set on this request.
         return (asText.isEmpty() || "-".equals(asText)) ? null : asText;
-    }
-
-    // the plugin interpolates nginx variables as strings, so "$status" arrives as "200"
-    private Integer integer(JsonNode node, String field) {
-        String asText = text(node, field);
-        if (asText == null) return null;
-        try {
-            return Integer.valueOf(asText.trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    /**
-     * The log_format calls this field upstream_latency_ms, but it holds
-     * $upstream_response_time, which nginx reports in seconds - hence the x1000. A request
-     * that hit more than one upstream carries them comma-separated; the first is the one
-     * that served the response.
-     */
-    private Double latencyMs(String value) {
-        if (value == null) return null;
-        String first = value.split(",")[0].trim();
-        try {
-            return Double.parseDouble(first) * 1000;
-        } catch (NumberFormatException e) {
-            return null;
-        }
     }
 }

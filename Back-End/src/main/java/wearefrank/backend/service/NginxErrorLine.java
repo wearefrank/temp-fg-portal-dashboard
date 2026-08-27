@@ -66,6 +66,32 @@ record NginxErrorLine(
     private static final Pattern MODULE = Pattern.compile(
             "^((?:\\[\\w+] )?[\\w./-]*\\.\\w+:\\d+): (.*)$", Pattern.DOTALL);
 
+    /**
+     * The parsed line by component name, absent where it parsed to nothing.
+     *
+     * What {@code LogField.errorSource} names, so that the field catalogue can say which
+     * part of an error line fills which column without the mapping restating it. Written out
+     * rather than reflected over: this runs once per row.
+     */
+    Map<String, String> asMap() {
+        Map<String, String> fields = new HashMap<>();
+        putIfSet(fields, "level", level);
+        putIfSet(fields, "module", module);
+        putIfSet(fields, "message", message);
+        putIfSet(fields, "client", client);
+        putIfSet(fields, "method", method);
+        putIfSet(fields, "path", path);
+        putIfSet(fields, "protocol", protocol);
+        putIfSet(fields, "host", host);
+        putIfSet(fields, "upstream", upstream);
+        putIfSet(fields, "requestId", requestId);
+        return fields;
+    }
+
+    private static void putIfSet(Map<String, String> fields, String key, String value) {
+        if (value != null) fields.put(key, value);
+    }
+
     static NginxErrorLine parse(String line) {
         Matcher prefix = PREFIX.matcher(line);
         if (!prefix.matches()) {

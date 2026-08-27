@@ -1,12 +1,17 @@
+import type { ReactNode } from 'react';
 import { createColumnHelper } from '@tanstack/react-table';
-import type { LogEntry, LogKind } from './types';
+import type { LogEntry, LogFieldDescriptor, LogFieldType } from './types';
 import type { logTableFeatures } from './features';
 import styles from './LokiLogTable.module.css';
 
-const formatTime = (iso: string): string => {
+// withDate is set for windows that can cross midnight, where a time of day on its own does
+// not say which day the line is from.
+const formatTime = (iso: string, withDate: boolean): string => {
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return iso;
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    if (!withDate) return time;
+    return `${date.toLocaleDateString([], { day: 'numeric', month: 'short' })} ${time}`;
 };
 
 const dash = <span className={styles.muted}>—</span>;
@@ -19,31 +24,106 @@ const levelClass = (level: string): string | undefined => {
     return undefined;
 };
 
+/**
+ * What every generated column's accessor returns.
+ *
+ * One type across all of them on purpose. columnHelper.columns() preserves each column's own
+ * value type through a variadic tuple, and a heterogeneous array widens them to a union that
+ * the table's `columns` option (typed at TValue = unknown) then rejects. Generated columns
+ * cannot be a tuple - there are as many as the server says - so they share a TValue instead,
+ * and the renderer narrows it by the field's type. Which it can: the type is the same thing
+ * the server coerced the value by.
+ */
+type LogFieldValue = string | number | null;
+
+/**
+ * How each kind of value is drawn, keyed by what it means rather than by which field it is.
+ *
+ * This is what lets a field added to the gateway's log format show up as a column with no
+ * change here: it arrives with a LogFieldType, and that names a renderer that already exists.
+ *
+ * `colorMap` is the palette for status pills, derived from whichever codes are on the page
+ * being rendered - data, not configuration, which is why these are built per render.
+ */
+const buildRenderers = (colorMap: Record<string, string>): Record<LogFieldType, (value: LogFieldValue) => ReactNode> => ({
+    TEXT: value => value ?? dash,
+
+    MUTED: value => <span className={styles.muted}>{value ?? '—'}</span>,
+
+    CODE: value => (value == null ? dash : <code className={styles.muted}>{value}</code>),
+
+    // No raw fallback any more: a line that parses as neither shape keeps its text in
+    // message, so an empty path really means the line had none.
+    PATH: value => (value == null ? dash : <span className={styles.pathCell}><code>{value}</code></span>),
+
+    // The widest column, and the one the error table is really for. Clipped rather than
+    // wrapped so a Lua traceback cannot make one row as tall as the panel - expanding the
+    // row shows it in full.
+    MESSAGE: value => (value == null ? dash : <span className={styles.messageCell}>{value}</span>),
+
+    LEVEL: value => {
+        if (value == null) return dash;
+        const severity = levelClass(String(value));
+        return severity
+            ? <span className={`${styles.levelBadge} ${severity}`}>{value}</span>
+            : <span className={styles.muted}>{value}</span>;
+    },
+
+    STATUS: value => (value == null ? dash : (
+        <span className={styles.statusBadge} style={{ background: colorMap[String(value)] }}>
+            {value}
+        </span>
+    )),
+
+    DURATION: value => (value == null ? dash : `${Number(value).toFixed(0)} ms`),
+
+    ROUTE: value => value ?? dash,
+});
+
+/**
+ * A field's value off a row. Everything reads its own id except ROUTE, which is two fields:
+ * a route without a name still has an id, and an unnamed route is more use identified than
+ * blank. The server keeps them apart on the record and says here that they are one column.
+ */
+const valueOf = (row: LogEntry, field: LogFieldDescriptor): LogFieldValue =>
+    field.type === 'ROUTE'
+        ? row.routeName ?? row.routeId
+        : (row[field.id] as LogFieldValue);
+
 const columnHelper = createColumnHelper<typeof logTableFeatures, LogEntry>();
 
 /**
- * Column definitions - the union of what both kinds of line carry.
+ * The table's columns, built from what the server says the log holds.
  *
- * One set rather than one per kind because the two overlap heavily: an access record and an
- * error line both name a method, a path, a host, a caller and an upstream. What differs is
- * which of them are worth showing, and that is column visibility rather than a second table
- * - see DEFAULT_HIDDEN_COLUMNS below.
+ * `fields` is GET /logs/fields?type=, in order - see LogFields on the back end, which is the
+ * single place the log's shape is written down. Declaring the columns here as well is what
+ * used to make a change to the gateway's log format a four-file edit, and a rename of one of
+ * its keys a column that quietly filled with dashes.
  *
- * Built from a factory rather than declared as a constant because the status cell needs the
- * palette, and that is derived from whichever codes are on the page being rendered - data,
- * not configuration.
+ * The three ahead of them are structural rather than log-format-derived, so they stay
+ * declared: the expander is not a field at all, and Time and Namespace come off the Loki
+ * stream rather than out of the line.
  *
  * `meta.label` is the human name for the column-visibility menu, which otherwise has only
  * the column id to show. `meta.align` moves numeric alignment onto the cell itself instead
  * of every cell wrapping its own span.
  *
- * Only Time is sortable, and its sort is Loki's `direction` rather than a local reorder.
+ * Every column here sorts, and none of them sorts locally: the sort state is handed to the
+ * server as `sort` and `direction`, and what comes back is a page of the window in that
+ * order. The expander is the one exception, and it gets that for free - it has no accessor,
+ * and TanStack does not offer to sort a display column.
  */
-export const buildColumns = (colorMap: Record<string, string>) =>
-    // columnHelper.columns() rather than a plain array: it preserves each column's own
-    // value type through a variadic tuple. A bare array widens them to a union that the
-    // table's `columns` option (typed at TValue = unknown) then rejects.
-    columnHelper.columns([
+export const buildColumns = (
+    fields: LogFieldDescriptor[],
+    colorMap: Record<string, string>,
+    showDate = false,
+) => {
+    const renderers = buildRenderers(colorMap);
+    // columnHelper.columns() rather than a plain array: it preserves each column's own value
+    // type through a variadic tuple. A bare array widens them to a union that the table's
+    // `columns` option (typed at TValue = unknown) then rejects. The generated columns spread
+    // into the tail of that tuple, which is what the shared LogFieldValue above is for.
+    return columnHelper.columns([
         columnHelper.display({
             id: 'expander',
             header: () => null,
@@ -54,10 +134,11 @@ export const buildColumns = (colorMap: Record<string, string>) =>
         }),
         columnHelper.accessor('timestamp', {
             header: 'Time',
-            // The one sortable column. Ordering by anything else would mean reordering the
-            // whole log, and Loki only offers time order.
+            // The default sort, and the only one Loki resolves itself - the others are
+            // ordered by the backend over the window before it cuts the page.
             enableSorting: true,
-            cell: info => <span className={styles.muted}>{formatTime(info.getValue())}</span>,
+            sortDescFirst: true,
+            cell: info => <span className={styles.muted}>{formatTime(info.getValue(), showDate)}</span>,
             meta: { label: 'Time' },
         }),
         // Next to Time because it is provenance rather than content: with the console pinned
@@ -69,125 +150,30 @@ export const buildColumns = (colorMap: Record<string, string>) =>
             cell: info => <span className={styles.muted}>{info.getValue() ?? '—'}</span>,
             meta: { label: 'Namespace' },
         }),
-        columnHelper.accessor('level', {
-            header: 'Level',
-            cell: info => {
-                const level = info.getValue();
-                if (level == null) return dash;
-                const severity = levelClass(level);
-                return severity
-                    ? <span className={`${styles.levelBadge} ${severity}`}>{level}</span>
-                    : <span className={styles.muted}>{level}</span>;
-            },
-            meta: { label: 'Level' },
-        }),
-        // Falls back to the id because a route without a name still has one, and an unnamed
-        // route is more useful identified than blank.
-        columnHelper.accessor(row => row.routeName ?? row.routeId, {
-            id: 'route',
-            header: 'Route',
-            cell: info => info.getValue() ?? dash,
-            meta: { label: 'Route' },
-        }),
-        columnHelper.accessor('method', {
-            header: 'Method',
-            cell: info => info.getValue() ?? dash,
-            meta: { label: 'Method' },
-        }),
-        columnHelper.accessor('path', {
-            header: 'Path',
-            cell: info => {
-                const path = info.getValue();
-                // No raw fallback any more: a line that parses as neither shape now keeps
-                // its text in message, so an empty path here really means the line had none.
-                return path == null ? dash : <span className={styles.pathCell}><code>{path}</code></span>;
-            },
-            meta: { label: 'Path' },
-        }),
-        columnHelper.accessor('module', {
-            header: 'Module',
-            cell: info => <span className={styles.muted}>{info.getValue() ?? '—'}</span>,
-            meta: { label: 'Module' },
-        }),
-        columnHelper.accessor('message', {
-            header: 'Message',
-            // The widest column, and the one the error table is really for. Clipped rather
-            // than wrapped so a Lua traceback cannot make one row as tall as the panel -
-            // expanding the row shows it in full.
-            cell: info => {
-                const message = info.getValue();
-                return message == null ? dash : <span className={styles.messageCell}>{message}</span>;
-            },
-            meta: { label: 'Message' },
-        }),
-        columnHelper.accessor('status', {
-            header: 'Status',
-            cell: info => {
-                const status = info.getValue();
-                if (status == null) return dash;
-                return (
-                    <span className={styles.statusBadge} style={{ background: colorMap[String(status)] }}>
-                        {status}
-                    </span>
-                );
-            },
-            meta: { label: 'Status' },
-        }),
-        columnHelper.accessor('latencyMs', {
-            header: 'Latency',
-            cell: info => {
-                const ms = info.getValue();
-                return ms == null ? dash : `${ms.toFixed(0)} ms`;
-            },
-            meta: { align: 'right', label: 'Latency' },
-        }),
-        columnHelper.accessor('host', {
-            header: 'Host',
-            cell: info => <span className={styles.muted}>{info.getValue() ?? '—'}</span>,
-            meta: { label: 'Host' },
-        }),
-        columnHelper.accessor('source', {
-            header: 'Client',
-            cell: info => <span className={styles.muted}>{info.getValue() ?? '—'}</span>,
-            meta: { label: 'Client' },
-        }),
-        columnHelper.accessor('upstream', {
-            header: 'Upstream',
-            cell: info => <span className={styles.muted}>{info.getValue() ?? '—'}</span>,
-            meta: { label: 'Upstream' },
-        }),
-        columnHelper.accessor('requestId', {
-            header: 'Request ID',
-            cell: info => {
-                const id = info.getValue();
-                return id == null ? dash : <code className={styles.muted}>{id}</code>;
-            },
-            meta: { label: 'Request ID' },
-        }),
-        columnHelper.accessor('gemeenteCode', {
-            header: 'Gemeente',
-            cell: info => <span className={styles.muted}>{info.getValue() ?? '—'}</span>,
-            meta: { label: 'Gemeente' },
-        }),
+        ...fields.map(field => columnHelper.accessor(row => valueOf(row, field), {
+            id: field.id,
+            header: field.label,
+            // Falls back rather than indexing straight in. TypeScript reads `renderers` as
+            // total over LogFieldType, but the type on the wire is whatever the server sent
+            // - the fetch asserts the shape, it does not check it. A LogFieldType added on
+            // the Java side and not mirrored here would otherwise be `undefined(value)`,
+            // which takes the whole table down with a TypeError. Plain text until someone
+            // gives the new type a renderer is the better failure.
+            cell: info => (renderers[field.type] ?? renderers.MUTED)(info.getValue()),
+            meta: { label: field.label, align: field.align ?? undefined },
+        })),
     ]);
+};
 
 /**
- * Columns hidden on first load, per kind.
+ * Which columns start open, for one kind - the shape the table's columnVisibility state
+ * takes. Absent from the map means visible, so only the hidden ones are named.
  *
- * Mostly this is the other kind's columns, which would be a row of dashes - but not only:
- * Host, Upstream and Gemeente are filled on an access record and still start hidden,
- * because fifteen columns is more than fits and those are the ones you go looking for
- * rather than scan. The visibility menu brings any of them back.
- *
- * Level is hidden on the audit table because the plugin writes a constant "INFO" there.
+ * Off the server's descriptors rather than a list here. Mostly what it hides is the other
+ * kind's columns, which would be a row of dashes, but not only: Host, Client, Upstream and
+ * Gemeente are filled on an access record and still start hidden, because fifteen columns is
+ * more than fits and those are the ones you go looking for rather than scan. The visibility
+ * menu brings any of them back.
  */
-export const DEFAULT_HIDDEN_COLUMNS: Record<LogKind, Record<string, boolean>> = {
-    audit: {
-        level: false, module: false, message: false, requestId: false,
-        host: false, source: false, upstream: false, gemeenteCode: false,
-    },
-    error: {
-        route: false, method: false, status: false, latencyMs: false,
-        host: false, source: false, upstream: false, gemeenteCode: false,
-    },
-};
+export const defaultVisibility = (fields: LogFieldDescriptor[]): Record<string, boolean> =>
+    Object.fromEntries(fields.filter(f => !f.defaultVisible).map(f => [f.id, false]));

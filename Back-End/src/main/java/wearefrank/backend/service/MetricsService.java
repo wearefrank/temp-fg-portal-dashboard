@@ -27,29 +27,29 @@ public class MetricsService {
         return apisixClient.controlGet("/v1/healthcheck");
     }
 
-    @SuppressWarnings("unchecked")
     public List<Object> getLiveRoutes() {
-        try {
-            Object parsed = objectMapper.readValue(apisixClient.controlGet("/v1/routes"), Object.class);
-            if (parsed instanceof List<?> list) {
-                return (List<Object>) list;
-            }
-            return List.of();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to parse live routes", e);
-        }
+        return getLiveEntities("/v1/routes", "routes");
     }
 
-    @SuppressWarnings("unchecked")
     public List<Object> getLiveUpstreams() {
+        return getLiveEntities("/v1/upstreams", "upstreams");
+    }
+
+    public List<Object> getLiveServices() {
+        return getLiveEntities("/v1/services", "services");
+    }
+
+    // the control API answers with a [{key, value}, ...] array for each entity type
+    @SuppressWarnings("unchecked")
+    private List<Object> getLiveEntities(String path, String label) {
         try {
-            Object parsed = objectMapper.readValue(apisixClient.controlGet("/v1/upstreams"), Object.class);
+            Object parsed = objectMapper.readValue(apisixClient.controlGet(path), Object.class);
             if (parsed instanceof List<?> list) {
                 return (List<Object>) list;
             }
             return List.of();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to parse live upstreams", e);
+            throw new RuntimeException("Failed to parse live " + label, e);
         }
     }
 

@@ -9,8 +9,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.server.ResponseStatusException;
 import wearefrank.backend.dto.LogEntryDto;
+import wearefrank.backend.dto.LogFieldDto;
 import wearefrank.backend.dto.LogKind;
 import wearefrank.backend.dto.LogPageDto;
+import wearefrank.backend.dto.MessageVolumeDto;
 
 import java.util.List;
 
@@ -22,6 +24,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -118,14 +121,26 @@ class LogsServiceTest {
         when(lokiClient.queryRange(anyString(), anyLong(), anyLong(), anyInt(), anyString())).thenReturn(body);
     }
 
+    /** LOKI_RETENTION_HOURS' default - 336h, two weeks. */
+    private static final long DEFAULT_RETENTION_HOURS = 336L;
+    private static final long DEFAULT_RETENTION_SECONDS = DEFAULT_RETENTION_HOURS * 3600L;
+
     @BeforeEach
     void setUp() {
-        logsService = new LogsService(lokiClient, new ObjectMapper().findAndRegisterModules(), "", "namespace");
+        logsService = new LogsService(lokiClient, new ObjectMapper().findAndRegisterModules(), "", "namespace",
+                DEFAULT_RETENTION_HOURS);
+    }
+
+    /** The same service, told the queried Loki keeps logs for a different span. */
+    private LogsService retaining(long retentionHours) {
+        return new LogsService(lokiClient, new ObjectMapper().findAndRegisterModules(), "", "namespace",
+                retentionHours);
     }
 
     /** The same service as the one under test, but with LOKI_NAMESPACE set. */
     private LogsService pinnedTo(String namespace, String label) {
-        return new LogsService(lokiClient, new ObjectMapper().findAndRegisterModules(), namespace, label);
+        return new LogsService(lokiClient, new ObjectMapper().findAndRegisterModules(), namespace, label,
+                DEFAULT_RETENTION_HOURS);
     }
 
     /** The first entry of a default audit query, which is what most of these assert against. */
@@ -360,7 +375,7 @@ class LogsServiceTest {
         countReturns(3);
         lokiReturns(numberedStream(3));
 
-        logsService.getPage("error", null, null, null, null, 1, 25, null);
+        logsService.getPage("error", null, null, null, null, 1, 25, null, null);
 
         verify(lokiClient).queryRange(eq(ERROR), anyLong(), anyLong(), anyInt(), anyString());
     }
@@ -427,7 +442,42 @@ class LogsServiceTest {
         ArgumentCaptor<Long> start = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<Long> end = ArgumentCaptor.forClass(Long.class);
         verify(lokiClient).queryRange(anyString(), start.capture(), end.capture(), anyInt(), anyString());
-        assertThat(end.getValue() - start.getValue()).isEqualTo(7 * 24 * 3600L * 1_000_000_000L);
+        assertThat(end.getValue() - start.getValue())
+                .isEqualTo(DEFAULT_RETENTION_SECONDS * 1_000_000_000L);
+    }
+
+    /**
+     * Loki cannot be asked how far back it holds, so the console is told. A deployment
+     * querying a Loki with a different retention_period sets LOKI_RETENTION_HOURS to match;
+     * "everything" then means what it means on that instance rather than on the local one.
+     */
+    @Test
+    void logRangeQuery_usesTheConfiguredRetention_whenStartTimeZero() {
+        lokiReturns(streams());
+
+        retaining(720).logRangeQuery(null, null, null, 0L, null, null, null);
+
+        ArgumentCaptor<Long> start = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> end = ArgumentCaptor.forClass(Long.class);
+        verify(lokiClient).queryRange(anyString(), start.capture(), end.capture(), anyInt(), anyString());
+        assertThat(end.getValue() - start.getValue()).isEqualTo(720 * 3600L * 1_000_000_000L);
+    }
+
+    /**
+     * Zero or negative would resolve startTime=0 to an empty or inverted window, so "all"
+     * would quietly return nothing. Falling back beats obeying a setting that can only break.
+     */
+    @Test
+    void logRangeQuery_fallsBackToTheDefaultRetention_whenConfiguredNonPositive() {
+        lokiReturns(streams());
+
+        retaining(0).logRangeQuery(null, null, null, 0L, null, null, null);
+
+        ArgumentCaptor<Long> start = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> end = ArgumentCaptor.forClass(Long.class);
+        verify(lokiClient).queryRange(anyString(), start.capture(), end.capture(), anyInt(), anyString());
+        assertThat(end.getValue() - start.getValue())
+                .isEqualTo(DEFAULT_RETENTION_SECONDS * 1_000_000_000L);
     }
 
     @Test
@@ -776,7 +826,7 @@ class LogsServiceTest {
         countReturns(5);
         lokiReturns(numberedStream(25));
 
-        pinnedTo("gem-a,gem-b", "namespace").getPage(null, null, null, null, null, 1, 25, null);
+        pinnedTo("gem-a,gem-b", "namespace").getPage(null, null, null, null, null, 1, 25, null, null);
 
         verify(lokiClient).queryRange(eq("{namespace=~\"gem-a|gem-b\", app_name=\"apisix\", log_type=\"audit\"}"),
                 anyLong(), anyLong(), anyInt(), anyString());
@@ -880,12 +930,172 @@ class LogsServiceTest {
     }
 
     @Test
+    void countLogs_reportsTheWindowItCounted() {
+        when(lokiClient.instantQuery(anyString(), any())).thenReturn(vector("1"));
+
+        // the default window is the last hour
+        assertThat(logsService.countLogs(null, null, null, null).windowSeconds()).isEqualTo(3600L);
+    }
+
+    /**
+     * startTime=0 means the retention window, which only the server knows - the caller
+     * cannot label the number without being told what span it covers.
+     */
+    @Test
+    void countLogs_reportsTheRetentionWindow_whenAskedForEverything() {
+        when(lokiClient.instantQuery(anyString(), any())).thenReturn(vector("1"));
+
+        assertThat(logsService.countLogs(null, null, null, 0L).windowSeconds())
+                .isEqualTo(DEFAULT_RETENTION_SECONDS);
+    }
+
+    @Test
     void countLogs_throwsRuntimeException_onUnparseableResponse() {
         when(lokiClient.instantQuery(anyString(), any())).thenReturn("not json");
 
         assertThatThrownBy(() -> logsService.countLogs(null, null, null, null))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Failed to parse Loki count response");
+    }
+
+    // --- week over week ------------------------------------------------------------
+
+    private static final long WEEK = 7 * 24 * 3600L;
+
+    /** Current window first, previous window second - the order messageVolume asks in. */
+    private void volumeReturns(String current, String previous) {
+        when(lokiClient.instantQuery(anyString(), any()))
+                .thenReturn(vector(current), vector(previous));
+    }
+
+    @Test
+    void messageVolume_countsBothWindowsAtTheDefaultWeek() {
+        volumeReturns("900", "600");
+
+        MessageVolumeDto volume = logsService.messageVolume(null, null, null, null);
+
+        assertThat(volume.current()).isEqualTo(900L);
+        assertThat(volume.previous()).isEqualTo(600L);
+        assertThat(volume.windowSeconds()).isEqualTo(WEEK);
+    }
+
+    @Test
+    void messageVolume_reportsGrowthAsAPercentageOfThePreviousWindow() {
+        volumeReturns("900", "600");
+
+        assertThat(logsService.messageVolume(null, null, null, null).changePercent()).isEqualTo(50.0);
+    }
+
+    @Test
+    void messageVolume_reportsAFallAsANegativePercentage() {
+        volumeReturns("300", "600");
+
+        assertThat(logsService.messageVolume(null, null, null, null).changePercent()).isEqualTo(-50.0);
+    }
+
+    @Test
+    void messageVolume_roundsThePercentageToOneDecimal() {
+        // 1/3 up: 33.333...% must not come back as a repeating double
+        volumeReturns("400", "300");
+
+        assertThat(logsService.messageVolume(null, null, null, null).changePercent()).isEqualTo(33.3);
+    }
+
+    /**
+     * The case that matters most in practice: the previous week is often outside Loki's
+     * retention, and reporting that as a 100% drop would read like the gateway went quiet.
+     */
+    @Test
+    void messageVolume_leavesTheChangeUnset_whenThePreviousWindowIsEmpty() {
+        volumeReturns("900", "0");
+
+        MessageVolumeDto volume = logsService.messageVolume(null, null, null, null);
+
+        assertThat(volume.previous()).isZero();
+        assertThat(volume.changePercent()).isNull();
+    }
+
+    @Test
+    void messageVolume_leavesTheChangeUnset_whenBothWindowsAreEmpty() {
+        volumeReturns("0", "0");
+
+        assertThat(logsService.messageVolume(null, null, null, null).changePercent()).isNull();
+    }
+
+    /**
+     * The two windows have to be adjacent and the same length, or the comparison is
+     * between unequal spans. Loki has no offset on count_over_time, so the previous window
+     * is expressed as the same range evaluated a window earlier.
+     */
+    @Test
+    void messageVolume_countsTwoAdjacentWindowsOfEqualLength() {
+        volumeReturns("1", "1");
+
+        long before = System.currentTimeMillis() / 1000;
+        logsService.messageVolume(null, null, null, null);
+        long after = System.currentTimeMillis() / 1000;
+
+        ArgumentCaptor<String> logql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Long> evalNanos = ArgumentCaptor.forClass(Long.class);
+        verify(lokiClient, times(2)).instantQuery(logql.capture(), evalNanos.capture());
+
+        // Both spans are one window wide...
+        assertThat(logql.getAllValues())
+                .containsExactly("sum(count_over_time(" + AUDIT + "[" + WEEK + "s]))",
+                        "sum(count_over_time(" + AUDIT + "[" + WEEK + "s]))");
+        // ...the current one evaluated at now, the previous one exactly a window earlier,
+        // so together they cover (now-2w, now] with no overlap and no gap.
+        assertThat(evalNanos.getAllValues().get(0)).isNull();
+        assertThat(evalNanos.getAllValues().get(1))
+                .isBetween((before - WEEK) * 1_000_000_000L, (after - WEEK) * 1_000_000_000L);
+    }
+
+    @Test
+    void messageVolume_honoursACustomWindow() {
+        volumeReturns("5", "4");
+
+        MessageVolumeDto volume = logsService.messageVolume(null, null, null, 3600L);
+
+        assertThat(volume.windowSeconds()).isEqualTo(3600L);
+        ArgumentCaptor<String> logql = ArgumentCaptor.forClass(String.class);
+        verify(lokiClient, times(2)).instantQuery(logql.capture(), any());
+        assertThat(logql.getAllValues())
+                .allMatch(q -> q.equals("sum(count_over_time(" + AUDIT + "[3600s]))"));
+    }
+
+    @Test
+    void messageVolume_countsWithinTheSelectedStream() {
+        volumeReturns("2", "1");
+
+        assertThat(logsService.messageVolume("error", null, null, null).query())
+                .isEqualTo("sum(count_over_time(" + ERROR + "[" + WEEK + "s]))");
+    }
+
+    @Test
+    void messageVolume_appliesTheSearchFilterToBothWindows() {
+        volumeReturns("2", "1");
+
+        logsService.messageVolume(null, null, "timeout", null);
+
+        ArgumentCaptor<String> logql = ArgumentCaptor.forClass(String.class);
+        verify(lokiClient, times(2)).instantQuery(logql.capture(), any());
+        assertThat(logql.getAllValues())
+                .allMatch(q -> q.contains(" |~ \"(?i)timeout\""));
+    }
+
+    @Test
+    void messageVolume_rejectsAnUnknownStream() {
+        assertThatThrownBy(() -> logsService.messageVolume("nonsense", null, null, null))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("audit, error");
+    }
+
+    /** Zero has no previous window to sit beside, so it is a mistake rather than "all". */
+    @Test
+    void messageVolume_rejectsANonPositiveWindow() {
+        assertThatThrownBy(() -> logsService.messageVolume(null, null, null, 0L))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("windowSeconds must be positive");
     }
 
     // --- paging cursor -------------------------------------------------------------
@@ -988,7 +1198,7 @@ class LogsServiceTest {
         // page 3 of 10 means fetching 30 newest and keeping the last 10
         lokiReturns(numberedStream(30));
 
-        LogPageDto page = logsService.getPage(null, null, null, null, null, 3, 10, null);
+        LogPageDto page = logsService.getPage(null, null, null, null, null, 3, 10, null, null);
 
         assertThat(page.page()).isEqualTo(3);
         assertThat(page.pageSize()).isEqualTo(10);
@@ -1002,7 +1212,7 @@ class LogsServiceTest {
         countReturns(500);
         lokiReturns(numberedStream(40));
 
-        logsService.getPage(null, null, null, null, null, 4, 10, null);
+        logsService.getPage(null, null, null, null, null, 4, 10, null, null);
 
         // one round trip, asking for everything down to the end of page 4
         verify(lokiClient).queryRange(anyString(), anyLong(), anyLong(), eq(40), eq("backward"));
@@ -1013,7 +1223,7 @@ class LogsServiceTest {
         countReturns(93);
         lokiReturns(numberedStream(25));
 
-        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 25, null);
+        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 25, null, null);
 
         assertThat(page.totalCount()).isEqualTo(93);
         assertThat(page.totalPages()).isEqualTo(4); // ceil(93/25)
@@ -1026,7 +1236,7 @@ class LogsServiceTest {
         lokiReturns(numberedStream(30));
 
         // asking for page 99 of 3 lands on 3 rather than erroring or returning nothing
-        assertThat(logsService.getPage(null, null, null, null, null, 99, 10, null).page()).isEqualTo(3);
+        assertThat(logsService.getPage(null, null, null, null, null, 99, 10, null, null).page()).isEqualTo(3);
     }
 
     @Test
@@ -1034,8 +1244,8 @@ class LogsServiceTest {
         countReturns(30);
         lokiReturns(numberedStream(10));
 
-        assertThat(logsService.getPage(null, null, null, null, null, 0, 10, null).page()).isEqualTo(1);
-        assertThat(logsService.getPage(null, null, null, null, null, -5, 10, null).page()).isEqualTo(1);
+        assertThat(logsService.getPage(null, null, null, null, null, 0, 10, null, null).page()).isEqualTo(1);
+        assertThat(logsService.getPage(null, null, null, null, null, -5, 10, null, null).page()).isEqualTo(1);
     }
 
     @Test
@@ -1043,7 +1253,7 @@ class LogsServiceTest {
         countReturns(0);
         lokiReturns(streams());
 
-        LogPageDto page = logsService.getPage(null, null, "nothing-matches-this", null, null, 1, 25, null);
+        LogPageDto page = logsService.getPage(null, null, "nothing-matches-this", null, null, 1, 25, null, null);
 
         assertThat(page.entries()).isEmpty();
         assertThat(page.totalCount()).isZero();
@@ -1059,7 +1269,7 @@ class LogsServiceTest {
         countReturns(50_000);
         lokiReturns(numberedStream(25));
 
-        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 25, null);
+        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 25, null, null);
 
         assertThat(page.totalCount()).isEqualTo(50_000);
         assertThat(page.totalPages()).isEqualTo(200);  // 5000 / 25, not 2000
@@ -1071,7 +1281,7 @@ class LogsServiceTest {
         countReturns(30);
         lokiReturns(numberedStream(20));
 
-        LogPageDto page = logsService.getPage(null, null, null, null, "1787661302684000000", 2, 10, null);
+        LogPageDto page = logsService.getPage(null, null, null, null, "1787661302684000000", 2, 10, null, null);
 
         assertThat(page.anchor()).isEqualTo("1787661302684000000");
         verify(lokiClient).queryRange(anyString(), anyLong(), eq(1787661302684000000L), anyInt(), anyString());
@@ -1089,7 +1299,7 @@ class LogsServiceTest {
         countReturns(30);
         lokiReturns(numberedStream(10));
 
-        logsService.getPage(null, null, null, null, "1787661302684000000", 1, 10, null);
+        logsService.getPage(null, null, null, null, "1787661302684000000", 1, 10, null, null);
 
         verify(lokiClient).instantQuery(anyString(), eq(1787661302684000000L - 1));
     }
@@ -1100,7 +1310,7 @@ class LogsServiceTest {
         lokiReturns(numberedStream(5));
         long nowNanos = (System.currentTimeMillis() / 1000) * 1_000_000_000L;
 
-        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 25, null);
+        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 25, null, null);
 
         assertThat(Long.parseLong(page.anchor())).isBetween(nowNanos, nowNanos + 5_000_000_000L);
     }
@@ -1110,7 +1320,7 @@ class LogsServiceTest {
         countReturns(3);
         lokiReturns(numberedStream(3));
 
-        logsService.getPage(null, null, "timeout", null, null, 1, 25, null);
+        logsService.getPage(null, null, "timeout", null, null, 1, 25, null, null);
 
         verify(lokiClient).queryRange(eq(AUDIT + " |~ \"(?i)timeout\""),
                 anyLong(), anyLong(), anyInt(), anyString());
@@ -1121,7 +1331,7 @@ class LogsServiceTest {
         countReturns(30);
         lokiReturns(numberedStream(10));
 
-        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 10, null);
+        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 10, null, null);
 
         assertThat(page.direction()).isEqualTo("backward");
         verify(lokiClient).queryRange(anyString(), anyLong(), anyLong(), anyInt(), eq("backward"));
@@ -1132,7 +1342,7 @@ class LogsServiceTest {
         countReturns(30);
         lokiReturns(numberedStream(10));
 
-        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 10, "forward");
+        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 10, "forward", null);
 
         assertThat(page.direction()).isEqualTo("forward");
         verify(lokiClient).queryRange(anyString(), anyLong(), anyLong(), anyInt(), eq("forward"));
@@ -1149,7 +1359,7 @@ class LogsServiceTest {
         // numberedStream emits line-0 newest .. line-2 oldest
         lokiReturns(numberedStream(3));
 
-        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 3, "forward");
+        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 3, "forward", null);
 
         assertThat(page.entries()).extracting(LogEntryDto::raw)
                 .containsExactly("line-2", "line-1", "line-0");
@@ -1160,7 +1370,7 @@ class LogsServiceTest {
         countReturns(10);
         lokiReturns(numberedStream(10));
 
-        assertThat(logsService.getPage(null, null, null, null, null, 1, 10, "sideways").direction())
+        assertThat(logsService.getPage(null, null, null, null, null, 1, 10, "sideways", null).direction())
                 .isEqualTo("backward");
     }
 
@@ -1169,7 +1379,201 @@ class LogsServiceTest {
         countReturns(10);
         lokiReturns(numberedStream(10));
 
-        assertThat(logsService.getPage(null, null, null, null, null, 1, null, null).pageSize()).isEqualTo(25);
-        assertThat(logsService.getPage(null, null, null, null, null, 1, 0, null).pageSize()).isEqualTo(25);
+        assertThat(logsService.getPage(null, null, null, null, null, 1, null, null, null).pageSize()).isEqualTo(25);
+        assertThat(logsService.getPage(null, null, null, null, null, 1, 0, null, null).pageSize()).isEqualTo(25);
+    }
+
+
+    // --- sorting by a column Loki knows nothing about --------------------------------
+
+    /** An audit line carrying just enough to sort on, at a chosen instant. */
+    private static String[] auditLine(String tsMillisOffset, String status, String latencySeconds, String route) {
+        String line = """
+                {"route_name":"%s","request":{"request_method":"GET","request_path":"/x"},\
+                "response":{"status":"%s","upstream_latency_ms":"%s"}}"""
+                .formatted(route, status, latencySeconds);
+        return new String[] { String.valueOf(1_700_000_000_000_000_000L + Long.parseLong(tsMillisOffset) * 1_000_000L), line };
+    }
+
+    private static String auditStream(String[]... lines) {
+        String[] flat = new String[lines.length * 2];
+        for (int i = 0; i < lines.length; i++) {
+            flat[i * 2] = lines[i][0];
+            flat[i * 2 + 1] = lines[i][1];
+        }
+        return streams(stream(flat));
+    }
+
+    /** Newest first by time, so any status order below is the sort's doing and not Loki's. */
+    private void threeStatuses() {
+        countReturns(3);
+        lokiReturns(auditStream(
+                auditLine("3", "200", "0.100", "a"),
+                auditLine("2", "500", "0.009", "b"),
+                auditLine("1", "404", "0.050", "c")));
+    }
+
+    @Test
+    void getPage_ordersByTheColumnAsked_notByTime() {
+        threeStatuses();
+
+        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 25, null, "status");
+
+        assertThat(page.entries()).extracting(LogEntryDto::status).containsExactly(500, 404, 200);
+    }
+
+    @Test
+    void getPage_ordersAColumnAscending_whenWalkingForward() {
+        threeStatuses();
+
+        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 25, "forward", "status");
+
+        assertThat(page.entries()).extracting(LogEntryDto::status).containsExactly(200, 404, 500);
+    }
+
+    /**
+     * The values arrive as text - the plugin interpolates every nginx variable as a string -
+     * and 100ms sorting under 9ms is exactly what comparing them as text would produce.
+     */
+    @Test
+    void getPage_ordersNumericColumnsNumerically() {
+        threeStatuses();
+
+        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 25, null, "latencyMs");
+
+        assertThat(page.entries()).extracting(LogEntryDto::latencyMs).containsExactly(100.0, 50.0, 9.0);
+    }
+
+    /** A row with nothing in the column has no place in the ordering, so it goes to the end. */
+    @Test
+    void getPage_keepsRowsMissingTheColumnLast_whicheverWay() {
+        countReturns(2);
+        lokiReturns(streams(stream(
+                "1700000002000000000", "not json at all",
+                "1700000001000000000", ACCESS_LINE)));
+
+        assertThat(logsService.getPage(null, null, null, null, null, 1, 25, null, "status").entries())
+                .extracting(LogEntryDto::status).containsExactly(200, null);
+        assertThat(logsService.getPage(null, null, null, null, null, 1, 25, "forward", "status").entries())
+                .extracting(LogEntryDto::status).containsExactly(200, null);
+    }
+
+    /** Worst first when descending, which is the only reason to sort a level column. */
+    @Test
+    void getPage_ordersLevelsBySeverityRatherThanAlphabetically() {
+        countReturns(3);
+        lokiReturns(streams(stream(
+                "1700000003000000000", "2026/08/26 08:21:43 [warn] 51#51: *1 [lua] a.lua:1: one",
+                "1700000002000000000", "2026/08/26 08:21:43 [crit] 51#51: *2 [lua] a.lua:1: two",
+                "1700000001000000000", "2026/08/26 08:21:43 [debug] 51#51: *3 [lua] a.lua:1: three")));
+
+        LogPageDto page = logsService.getPage("error", null, null, null, null, 1, 25, null, "level");
+
+        assertThat(page.entries()).extracting(LogEntryDto::level).containsExactly("CRIT", "WARN", "DEBUG");
+    }
+
+    /**
+     * A sorted page cannot be cut from a page-deep over-fetch: page 2 of "slowest first"
+     * would then be slower than page 1. So the whole reachable window is fetched, in time
+     * order, and ordered here.
+     */
+    @Test
+    void getPage_fetchesTheWholeReachableWindowForAColumnSort() {
+        countReturns(30);
+        lokiReturns(numberedStream(30));
+
+        logsService.getPage(null, null, null, null, null, 1, 10, "forward", "status");
+
+        ArgumentCaptor<Integer> limit = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<String> direction = ArgumentCaptor.forClass(String.class);
+        verify(lokiClient).queryRange(anyString(), anyLong(), anyLong(), limit.capture(), direction.capture());
+        assertThat(limit.getValue()).isEqualTo(5000);
+        // Backward whichever way the column is ordered: the depth budget is measured from
+        // the anchor, so the reachable window is the newest lines in it either way.
+        assertThat(direction.getValue()).isEqualTo("backward");
+    }
+
+    /** Time order stays cheap - it is Loki's own, and the over-fetch only has to reach the page. */
+    @Test
+    void getPage_overFetchesOnlyToThePage_whenSortingByTime() {
+        countReturns(100);
+        lokiReturns(numberedStream(40));
+
+        logsService.getPage(null, null, null, null, null, 4, 10, null, "timestamp");
+
+        verify(lokiClient).queryRange(anyString(), anyLong(), anyLong(), eq(40), anyString());
+    }
+
+    /**
+     * A sort can go stale - a saved URL, a column that has since gone - and dropping the
+     * reader on a 400 for that is worse than showing them the newest lines.
+     */
+    @Test
+    void getPage_fallsBackToTimeOrderForAColumnThatIsNotOne() {
+        countReturns(10);
+        lokiReturns(numberedStream(10));
+
+        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 10, null, "not-a-column");
+
+        assertThat(page.sort()).isEqualTo("timestamp");
+        assertThat(page.entries()).extracting(LogEntryDto::raw).startsWith("line-0");
+    }
+
+    /** Echoed for the same reason as direction: so the indicator shows what the server did. */
+    @Test
+    void getPage_echoesTheColumnItSortedBy() {
+        threeStatuses();
+
+        assertThat(logsService.getPage(null, null, null, null, null, 1, 25, null, "status").sort())
+                .isEqualTo("status");
+        assertThat(logsService.getPage(null, null, null, null, null, 1, 25, null, null).sort())
+                .isEqualTo("timestamp");
+    }
+
+    /** routeId is read only so the Route column can fall back to it - the sort follows the cell. */
+    @Test
+    void getPage_sortsTheRouteColumnByWhatTheCellShows() {
+        countReturns(2);
+        lokiReturns(streams(stream(
+                "1700000002000000000", "{\"audit\":{\"route_id\":\"aaa\"}}",
+                "1700000001000000000", "{\"route_name\":\"zzz\",\"audit\":{\"route_id\":\"111\"}}")));
+
+        LogPageDto page = logsService.getPage(null, null, null, null, null, 1, 25, "forward", "routeName");
+
+        assertThat(page.entries()).extracting(LogEntryDto::routeId).containsExactly("aaa", "111");
+    }
+
+    /**
+     * Both tables are offered every column - which is how the visibility menu can bring one
+     * of the other kind's back - and differ only in which start open.
+     */
+    @Test
+    void describeFields_offersTheSameColumnsToBothKinds() {
+        List<String> audit = logsService.describeFields("audit").stream().map(LogFieldDto::id).toList();
+        List<String> error = logsService.describeFields("error").stream().map(LogFieldDto::id).toList();
+
+        assertThat(audit).isEqualTo(error);
+        assertThat(audit).startsWith("level", "routeName", "method", "path")
+                // routeId is read so that the Route column can fall back to it, and shown by
+                // that column rather than one of its own.
+                .doesNotContain("routeId", "type", "timestamp", "tsNanos", "raw");
+    }
+
+    @Test
+    void describeFields_opensTheColumnsThatKindFills() {
+        assertThat(logsService.describeFields("audit"))
+                .filteredOn(LogFieldDto::defaultVisible).extracting(LogFieldDto::id)
+                .containsExactly("routeName", "method", "path", "status", "latencyMs");
+
+        assertThat(logsService.describeFields("error"))
+                .filteredOn(LogFieldDto::defaultVisible).extracting(LogFieldDto::id)
+                .containsExactly("level", "path", "module", "message", "requestId");
+    }
+
+    @Test
+    void describeFields_rejectsAnUnknownType() {
+        assertThatThrownBy(() -> logsService.describeFields("acces"))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("type must be one of audit, error");
     }
 }

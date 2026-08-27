@@ -5,6 +5,24 @@
     margin-top: 1.5rem;
 }
 
+/* The sync icon turns while a refresh is in flight - the page's only refresh indicator. */
+@keyframes syncSpin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+
+.syncSpinning {
+    display: inline-block;
+    animation: syncSpin 1.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .syncSpinning {
+        animation: none;
+        opacity: 0.5;
+    }
+}
+
 .statusDot {
     display: inline-block;
     width: 10px;

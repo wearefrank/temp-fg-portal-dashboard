@@ -31,3 +31,35 @@
     font-weight: 600;
     font-variant-numeric: tabular-nums;
 }
+
+/* Count and its delta sit together on the right-hand side of the row. */
+.rowValue {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.delta {
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.deltaSuffix {
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+
+.deltaUp {
+    color: var(--success-color);
+}
+
+.deltaDown {
+    color: var(--error-color);
+}
+
+/* Unchanged is neither, and colouring it either way would imply a direction. */
+.deltaFlat {
+    color: var(--text-secondary);
+}

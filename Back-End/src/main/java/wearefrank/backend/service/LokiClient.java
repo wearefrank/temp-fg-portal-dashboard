@@ -61,13 +61,8 @@ public class LokiClient {
      * Instant query, for the metric-style LogQL the counters use
      * (sum(count_over_time(...))). The range form above returns log lines; this one
      * returns a single scalar per series.
-     */
-    public String instantQuery(String logql) {
-        return instantQuery(logql, null);
-    }
-
-    /**
-     * @param timeNanos evaluate as of this instant instead of now. Paging pins it so the
+     *
+     * @param timeNanos evaluate as of this instant, or null for now. Paging pins it so the
      *                  total cannot move between one page request and the next - without
      *                  it, lines arriving mid-session change how many pages there are.
      */

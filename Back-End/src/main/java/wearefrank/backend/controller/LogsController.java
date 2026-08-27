@@ -3,7 +3,9 @@ package wearefrank.backend.controller;
 import org.springframework.web.bind.annotation.*;
 import wearefrank.backend.dto.LogCountDto;
 import wearefrank.backend.dto.LogEntryDto;
+import wearefrank.backend.dto.LogFieldDto;
 import wearefrank.backend.dto.LogPageDto;
+import wearefrank.backend.dto.MessageVolumeDto;
 import wearefrank.backend.service.LogsService;
 
 import java.util.List;
@@ -27,6 +29,19 @@ public class LogsController {
 
     public LogsController(LogsService logsService) {
         this.logsService = logsService;
+    }
+
+    /**
+     * The columns the log table should draw for a kind, in order: id, label, what the value
+     * means, and whether it starts open.
+     *
+     * Here so that the field list lives in one place rather than being restated in the
+     * browser - see {@link wearefrank.backend.dto.LogFields}. A field added to the gateway's
+     * log_format shows up here, and the table picks it up without a front-end change.
+     */
+    @GetMapping("/fields")
+    public List<LogFieldDto> getFields(@RequestParam(required = false) String type) {
+        return logsService.describeFields(type);
     }
 
     @GetMapping("/recent")
@@ -57,6 +72,21 @@ public class LogsController {
     }
 
     /**
+     * The same count taken twice, over this window and the one before it, for the
+     * dashboard's "this week vs last week" line. Separate from /count because that one
+     * answers about the window a table is showing; this one is always a back-to-back pair.
+     */
+    @GetMapping("/volume")
+    public MessageVolumeDto messageVolume(
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String query,
+            @RequestParam(required = false) String search,
+            // Length of each of the two windows, in seconds. Defaults to a week.
+            @RequestParam(required = false) Long windowSeconds) {
+        return logsService.messageVolume(type, query, search, windowSeconds);
+    }
+
+    /**
      * One numbered page, with the totals the pager needs. Pass the anchor back from the
      * previous response so every page in a session is cut from the same set of lines.
      */
@@ -72,9 +102,12 @@ public class LogsController {
             @RequestParam(required = false) String anchor,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer pageSize,
-            // "forward" walks the window oldest-first; anything else is newest-first.
-            @RequestParam(required = false) String direction) {
-        return logsService.getPage(type, query, search, windowSeconds, anchor, page, pageSize, direction);
+            // "forward" is ascending - oldest-first for time, A-Z for a text column.
+            @RequestParam(required = false) String direction,
+            // Which column to order by: a log field id, or "timestamp" for time order, which
+            // is the default. Anything this log has no column for falls back to time.
+            @RequestParam(required = false) String sort) {
+        return logsService.getPage(type, query, search, windowSeconds, anchor, page, pageSize, direction, sort);
     }
 
     @GetMapping("/range")

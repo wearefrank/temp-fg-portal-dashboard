@@ -110,6 +110,32 @@ class MetricsServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void getLiveServices_parsesJsonArray() {
+        when(apisixClient.controlGet("/v1/services")).thenReturn("[{\"id\":\"s1\"}]");
+
+        Object result = metricsService.getLiveServices();
+
+        assertThat((List<Object>) result).containsExactly(Map.of("id", "s1"));
+    }
+
+    @Test
+    void getLiveServices_throwsOnInvalidJson() {
+        when(apisixClient.controlGet("/v1/services")).thenReturn("not-json");
+
+        assertThatThrownBy(() -> metricsService.getLiveServices())
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to parse live services");
+    }
+
+    @Test
+    void getLiveServices_returnsEmptyList_whenControlApiAnswersWithNonArray() {
+        when(apisixClient.controlGet("/v1/services")).thenReturn("{}");
+
+        assertThat(metricsService.getLiveServices()).isEmpty();
+    }
+
+    @Test
     void prometheusQuery_delegatesToPrometheusClient() {
         when(prometheusClient.query("up")).thenReturn("{\"status\":\"success\"}");
 

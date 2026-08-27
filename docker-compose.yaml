@@ -1,3 +1,7 @@
+# Pinned so the project (and its network) is called frank-gateway-console
+# regardless of the directory this file sits in.
+name: frank-gateway-console
+
 services:
   apisix:
     image: ghcr.io/wearefrank/frank-gateway:master
@@ -22,8 +26,110 @@ services:
     configs:
       - source: prometheus_config
         target: /etc/prometheus/prometheus.yml
+    # Without this the TSDB lives on the container filesystem, so every
+    # `docker compose down` or `--force-recreate` starts the dashboard's history from
+    # empty - the gateway's own counters reset with it and there is nothing left to
+    # reconstruct them from. Loki and Grafana below already persist; this was the gap.
+    volumes:
+      - prometheus_data:/prometheus
     ports:
       - "9090:9090"
+
+  # Log store for the gateway's access logs, pushed by the loki-logger plugin
+  # configured in config/apisix.yaml. Loki has no UI of its own - query it through
+  # Grafana below, or over HTTP at http://localhost:3100/loki/api/v1/query_range.
+  loki:
+    image: grafana/loki:3.5.1
+    restart: always
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    configs:
+      - source: loki_config
+        target: /etc/loki/loki.yaml
+    volumes:
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+
+  # Reads both Loki and Prometheus, provisioned as datasources so there is nothing
+  # to click through on first start. Login is disabled: everyone is an admin, which
+  # is fine for a local stack and wrong for anything else.
+  grafana:
+    image: grafana/grafana:11.6.1
+    restart: always
+    configs:
+      - source: grafana_datasources
+        target: /etc/grafana/provisioning/datasources/datasources.yaml
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      # Land on Explore against Loki instead of an empty home dashboard.
+      - GF_USERS_HOME_PAGE=/explore
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - loki
+      - prometheus
+
+  # ---- Test rig - start with: docker compose --profile test up -d --------------
+  # Two mock backends rather than one shared instance, so $upstream_addr and
+  # $upstream_host differ per route in the Loki log lines the way they do against
+  # the real Centric and Djuma endpoints. go-httpbin serves /anything/*, /status/*
+  # and /delay/*, which is everything config/apisix.yaml asks of them.
+  centric-mock:
+    image: mccutchen/go-httpbin:v2.15.0
+    restart: always
+    profiles: [test]
+
+  djuma-mock:
+    image: mccutchen/go-httpbin:v2.15.0
+    restart: always
+    profiles: [test]
+
+  # The test client, with a control panel on http://localhost:8090. Every route in
+  # config/loadgen.toml runs on its own jittered schedule, with optional burst
+  # windows and randomised request data, so the traffic does not arrive as one
+  # flat round-robin. The panel shows what is being sent and lets you retune it
+  # live; the scenario file stays the source of truth and a restart forgets the
+  # overrides. Entirely separate from the console - nothing here is part of the
+  # application under test.
+  loadgen:
+    image: python:3.13-alpine
+    restart: always
+    profiles: [test]
+    command: ["python", "-u", "/loadgen.py"]
+    configs:
+      - source: loadgen_script
+        target: /loadgen.py
+      - source: loadgen_scenario
+        target: /loadgen.toml
+      - source: loadgen_ui
+        target: /loadgen.html
+    ports:
+      # Bound to localhost only - it is a test tool that can fire arbitrary
+      # requests at the gateway, and has no business being on the network.
+      - "127.0.0.1:8090:8090"
+    environment:
+      - GATEWAY=http://apisix:9080
+      # Control panel: http://localhost:8090. Set to 0 to run headless.
+      - UI_PORT=8090
+      # Scales every interval in the scenario at once: 0.25 is four times busier,
+      # 4 is four times quieter. The knob to reach for first.
+      - INTERVAL_SCALE=1.0
+      # Comma-separated entry names to run, empty runs all of them.
+      - ONLY=
+      # Set to any fixed value to make a run reproducible.
+      - SEED=
+      - SUMMARY_EVERY=60
+    depends_on:
+      - apisix
+      - centric-mock
+      - djuma-mock
 
   # Test identity provider - start with: docker compose --profile keycloak up
   # Admin console: http://localhost:8081  (admin / admin)
@@ -76,6 +182,34 @@ services:
       - "8080:8080"
     environment:
       - PROMETHEUS_URL=http://host.docker.internal:9090
+      # The gateway's access log, pushed by the loki-logger plugin in config/apisix.yaml
+      # and read back by the console's log panels. The compose Loki is reachable by
+      # service name, so unlike the two above this default needs no
+      # host.docker.internal hop - override it to read from a Loki elsewhere, in which
+      # case point the loki-logger endpoint_addrs in config/apisix.yaml at the same one.
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      # X-Scope-OrgID, sent only when non-empty. The compose Loki runs with
+      # auth_enabled: false and files every line under one tenant regardless, so this
+      # matters only against a multi-tenant instance - where it has to match the
+      # tenant_id the loki-logger plugin pushes under, or the console queries a tenant
+      # nothing writes to.
+      - LOKI_TENANT_ID=${LOKI_TENANT_ID:-}
+      # Pins every log query to a namespace, by ANDing namespace="<this>" into the
+      # stream selector - for a Loki several environments push to. Empty means no
+      # restriction; the value has to match loki-logger.log_labels.namespace in
+      # config/apisix.yaml, which is "local" here.
+      #
+      # A comma-separated list scopes to several at once - namespace=~"a|b" - and the log
+      # tables show them merged, newest first, with a Namespace column saying which is which.
+      - LOKI_NAMESPACE=${LOKI_NAMESPACE:-}
+      # The label carrying it, if a collector relabelled it to something else.
+      - LOKI_NAMESPACE_LABEL=${LOKI_NAMESPACE_LABEL:-namespace}
+      # How far back "all" reaches, in hours. Loki has no endpoint reporting its own
+      # retention, so the console is told - match this to retention_period in the queried
+      # Loki's config (config/loki.yaml here). Overshooting is free: the query widens over
+      # lines already deleted and returns the same rows. Undershooting silently hides data
+      # Loki still holds, so guess high when the real value is unknown.
+      - LOKI_RETENTION_HOURS=${LOKI_RETENTION_HOURS:-336}
       - APISIX_HOST=http://host.docker.internal
       # How users sign in: OIDC uses the Keycloak settings below, IN_MEMORY uses accounts
       # you provision yourself. To try the console without running Keycloak at all, set
@@ -98,147 +232,16 @@ services:
       - backend_data:/data
     depends_on:
       - apisix
+      - loki
 
 configs:
+  # Both APISIX configs live in config/ so they can be edited as ordinary YAML
+  # files. Routes are re-read by APISIX within a second; the app config needs
+  # `docker compose up -d --force-recreate apisix`.
   apisix_routes:
-    content: |
-      routes:
-        - id: metrics-test
-          uri: /-/healthy
-          upstream:
-            type: roundrobin
-            nodes:
-              "prometheus:9090": 1
-          plugins:
-            prometheus: {}
-        #END
+    file: ./config/apisix.yaml            # routes, upstreams, services, consumers
   apisix_config:
-    content: |
-      apisix:
-        enable_control: true
-        control:
-          ip: "0.0.0.0"
-          port: 9092
-        enable_admin: false
-        extra_lua_path: "/usr/local/apisix/custom-plugins/?.lua"
-        extra_lua_cpath: "/usr/local/apisix/custom-plugin-libs/?.so"
-
-      nginx_config:
-        http:
-          custom_lua_shared_dict:
-            fsc-registration: 1m
-            openid-connect-client-cache: 1m
-            generic-oauth-client-cache: 1m
-            jwt-client-cache: 1m
-
-      plugins:
-        - real-ip
-        - ai
-        - client-control
-        - proxy-control
-        - request-id
-        - zipkin
-        - ext-plugin-pre-req
-        - fault-injection
-        - mocking
-        - serverless-pre-function
-        - cors
-        - ip-restriction
-        - ua-restriction
-        - referer-restriction
-        - csrf
-        - uri-blocker
-        - request-validation
-        - chaitin-waf
-        - multi-auth
-        - openid-connect
-        - cas-auth
-        - authz-casbin
-        - authz-casdoor
-        - wolf-rbac
-        - ldap-auth
-        - hmac-auth
-        - basic-auth
-        - jwt-auth
-        - jwe-decrypt
-        - key-auth
-        - consumer-restriction
-        - forward-auth
-        - opa
-        - authz-keycloak
-        - proxy-cache
-        - body-transformer
-        - proxy-mirror
-        - proxy-rewrite
-        - workflow
-        - api-breaker
-        - limit-conn
-        - limit-count
-        - limit-req
-        - gzip
-        - server-info
-        - traffic-split
-        - redirect
-        - response-rewrite
-        - degraphql
-        - kafka-proxy
-        - grpc-transcode
-        - grpc-web
-        - public-api
-        - prometheus
-        - datadog
-        - loki-logger
-        - elasticsearch-logger
-        - echo
-        - loggly
-        - http-logger
-        - splunk-hec-logging
-        - skywalking-logger
-        - google-cloud-logging
-        - sls-logger
-        - tcp-logger
-        - kafka-logger
-        - rocketmq-logger
-        - syslog
-        - udp-logger
-        - file-logger
-        - clickhouse-logger
-        - tencent-cloud-cls
-        - inspect
-        - example-plugin
-        - cert-auth
-        - frank-sender
-        - generic-oauth-client
-        - jwt-client
-        - limit-size
-        - soap-action-router
-        - openid-connect-client
-        - fsc
-        - aws-lambda
-        - azure-functions
-        - openwhisk
-        - openfunction
-        - serverless-post-function
-        - ext-plugin-post-req
-        - ext-plugin-post-resp
-
-      plugin_attr:
-        prometheus:
-          enable_export_server: true
-          export_addr:
-            ip: 0.0.0.0
-            port: 9091
-          metrics:
-            http_status:
-              extra_labels:
-                - upstream_addr: $$upstream_addr
-                - status: $$upstream_status
-                - soap_action: $$soap_action
-
-      deployment:
-        role: data_plane
-        role_data_plane:
-          config_provider: yaml
+    file: ./config/apisix-config.yaml     # gateway settings and enabled plugins
   keycloak_realm:
     content: |
       {
@@ -376,24 +379,23 @@ configs:
         ]
       }
   prometheus_config:
-    content: |
-      global:
-        scrape_interval: 1s
-        external_labels:
-          stack: "apisix"
-      scrape_configs:
-        - job_name: "prometheus"
-          scrape_interval: 5s
-          static_configs:
-            - targets: ["localhost:9090"]
-        - job_name: "apisix"
-          scrape_interval: 5s
-          metrics_path: "/apisix/prometheus/metrics"
-          static_configs:
-            - targets: ["apisix:9091"]
+    file: ./config/prometheus.yml
+  loki_config:
+    file: ./config/loki.yaml
+  grafana_datasources:
+    file: ./config/grafana-datasources.yaml
+  loadgen_script:
+    file: ./config/loadgen.py
+  loadgen_scenario:
+    file: ./config/loadgen.toml
+  loadgen_ui:
+    file: ./config/loadgen.html
 
 volumes:
   backend_data:
+  prometheus_data:
+  loki_data:
+  grafana_data:
 
 networks:
   default:

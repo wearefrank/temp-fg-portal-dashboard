@@ -1,0 +1,147 @@
+.wrap {
+    position: relative;
+}
+
+/* Height, type size and background match the other controls in LokiLogTable's toolbar,
+   which is the only place this picker is used - see the shared rule in its module. */
+.trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    box-sizing: border-box;
+    height: 1.9rem;
+    padding: 0 0.55rem;
+    font-size: 0.82rem;
+    font-family: inherit;
+    color: inherit;
+    /* --bg-primary is defined nowhere, so this used to fall back to transparent. */
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.trigger:hover {
+    background: var(--bg-tertiary);
+}
+
+.caret {
+    color: var(--text-secondary);
+}
+
+/* Same shell as the Columns menu next to it. */
+.panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 6;
+    width: 250px;
+    padding: 0.55rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: var(--shadow-md);
+}
+
+.section {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    margin-bottom: 0.4rem;
+}
+
+.field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+    font-size: 0.8rem;
+}
+
+.field input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0.25rem 0.35rem;
+    font-size: 0.8rem;
+    font-family: inherit;
+    color: inherit;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+.field input:focus {
+    outline: none;
+    border-color: var(--color-primary, #3b82f6);
+}
+
+.applyRow {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+}
+
+.apply {
+    padding: 0.25rem 0.7rem;
+    font-size: 0.8rem;
+    font-family: inherit;
+    color: #fff;
+    background: var(--color-primary, #3b82f6);
+    border: 1px solid var(--color-primary, #3b82f6);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.apply:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.invalid {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+}
+
+.divider {
+    height: 1px;
+    margin: 0.55rem 0 0.4rem;
+    background: var(--border-dim);
+}
+
+/* Capped so a long list scrolls inside the popover instead of running off the card. */
+.quickList {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.quick {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0.25rem 0.35rem;
+    font-size: 0.82rem;
+    font-family: inherit;
+    text-align: left;
+    color: inherit;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.quick:hover {
+    background: var(--bg-tertiary);
+}
+
+.quickActive {
+    color: var(--color-primary, #3b82f6);
+    font-weight: 600;
+}
