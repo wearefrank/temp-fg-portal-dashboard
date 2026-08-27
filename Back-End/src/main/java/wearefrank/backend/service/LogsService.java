@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import wearefrank.backend.dto.LogCountDto;
 import wearefrank.backend.dto.LogEntryDto;
+import wearefrank.backend.dto.LogKind;
 import wearefrank.backend.dto.LogPageDto;
 
 import java.time.Instant;
@@ -19,16 +20,13 @@ import java.util.List;
  * The logs equivalent of {@link MetricsService}'s Prometheus half: resolves the query
  * window, then either hands the Loki response straight back or flattens it into rows the
  * dashboard table can render.
+ *
+ * The gateway writes two kinds of line and keeps them in separate Loki streams, so every
+ * entry point takes a {@link LogKind} to say which one to read - see {@code toEntry} for
+ * how each is taken apart, and {@code LogKind} for why they are separate at all.
  */
 @Service
 public class LogsService {
-
-    /**
-     * Every line the gateway writes carries app_name="apisix" (loki-logger.log_labels in
-     * config/apisix.yaml), so this selects the access log and nothing else that may be
-     * sharing the Loki instance.
-     */
-    public static final String DEFAULT_SELECTOR = "{app_name=\"apisix\"}";
 
     private static final int DEFAULT_LIMIT = 100;
     // Loki's own default cap is 5000; staying well under it keeps a mistyped limit from
@@ -48,13 +46,15 @@ public class LogsService {
 
     private final LokiClient lokiClient;
     private final ObjectMapper objectMapper;
-    private final String namespace;
+    private final List<String> namespaces;
     private final String namespaceLabel;
 
     public LogsService(LokiClient lokiClient, ObjectMapper objectMapper,
-                       // Every query this service builds gets pinned to this namespace, the
-                       // caller's own selector included - see buildPipeline. Empty means no
-                       // pinning, which is what a single-tenant Loki wants.
+                       // Every query this service builds gets pinned to these namespaces, the
+                       // caller's own selector included - see buildPipeline. A comma-separated
+                       // list scopes the console to several at once and the tables show them
+                       // merged. Empty means no pinning, which is what a single-tenant Loki
+                       // wants.
                        @Value("${LOKI_NAMESPACE:}") String namespace,
                        // Which label carries it. "namespace" is what the gateway's
                        // loki-logger pushes (config/apisix.yaml) and what a Kubernetes
@@ -63,28 +63,67 @@ public class LogsService {
                        @Value("${LOKI_NAMESPACE_LABEL:namespace}") String namespaceLabel) {
         this.lokiClient = lokiClient;
         this.objectMapper = objectMapper;
-        this.namespace = namespace == null ? "" : namespace.trim();
+        this.namespaces = parseNamespaces(namespace);
         this.namespaceLabel = (namespaceLabel == null || namespaceLabel.isBlank())
                 ? "namespace" : namespaceLabel.trim();
     }
 
+    /**
+     * Splits LOKI_NAMESPACE into the set to scope to.
+     *
+     * Blanks are dropped rather than kept, so a trailing comma or a value assembled by a
+     * template that left a slot empty narrows to what is actually named instead of pinning
+     * to a namespace called "". Duplicates are dropped too, in first-seen order - repeating
+     * one in the alternation changes nothing about what matches and only makes the query
+     * harder to read in a log.
+     *
+     * An empty result is the unpinned case, which is also what an unset variable gives.
+     */
+    private static List<String> parseNamespaces(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        List<String> parsed = new ArrayList<>();
+        for (String part : raw.split(",")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty() && !parsed.contains(trimmed)) {
+                parsed.add(trimmed);
+            }
+        }
+        return List.copyOf(parsed);
+    }
+
     // raw passthrough, same contract as prometheusRangeQuery:
     // startTime=null -> last hour, startTime=0 -> the whole retention window
-    public String logRangeQuery(String query, String search, Long startTime, String endCursor,
-                                Integer limit, String direction) {
+    public String logRangeQuery(String type, String query, String search, Long startTime,
+                                String endCursor, Integer limit, String direction) {
         long now = System.currentTimeMillis() / 1000;
         String resolvedDirection = "forward".equals(direction) ? "forward" : "backward";
         return lokiClient.queryRange(
-                buildPipeline(query, search),
+                buildPipeline(resolveKind(type), query, search),
                 resolveStart(startTime, now) * NANOS_PER_SECOND,
                 resolveEndNanos(endCursor, now),
                 resolveLimit(limit), resolvedDirection);
     }
 
-    public List<LogEntryDto> getRecentLogs(String query, String search, Long startTime,
+    public List<LogEntryDto> getRecentLogs(String type, String query, String search, Long startTime,
                                            String endCursor, Integer limit) {
-        String body = logRangeQuery(query, search, startTime, endCursor, limit, "backward");
+        String body = logRangeQuery(type, query, search, startTime, endCursor, limit, "backward");
         return parseStreams(body, resolveLimit(limit));
+    }
+
+    /**
+     * Which of the two streams the caller means. Anything that is not one of the kinds is a
+     * 400 rather than a silent fall back to the access log - a typo answering with audit
+     * lines reads like the error log is empty, which is the wrong thing to be reassured by.
+     */
+    private LogKind resolveKind(String type) {
+        LogKind kind = LogKind.fromParam(type);
+        if (kind == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "type must be one of audit, error - got: " + type);
+        }
+        return kind;
     }
 
     /**
@@ -116,11 +155,11 @@ public class LogsService {
      * How many lines match, counted by Loki over the whole window rather than by counting
      * the page that came back. Without this the UI can only ever report its own limit.
      */
-    public LogCountDto countLogs(String query, String search, Long startTime) {
-        return countLogs(query, search, startTime, null);
+    public LogCountDto countLogs(String type, String query, String search, Long startTime) {
+        return countLogs(resolveKind(type), query, search, startTime, null);
     }
 
-    LogCountDto countLogs(String query, String search, Long startTime, Long anchorNanos) {
+    LogCountDto countLogs(LogKind kind, String query, String search, Long startTime, Long anchorNanos) {
         long now = System.currentTimeMillis() / 1000;
         // Counting as of the anchor rather than now, so the total a pager was drawn from
         // stays put while the user clicks through it.
@@ -128,7 +167,7 @@ public class LogsService {
         long start = resolveStart(startTime, now);
         // count_over_time needs a range, and it has to match the window the table shows or
         // the total describes a different slice of time than the rows underneath it.
-        String logql = "sum(count_over_time(" + buildPipeline(query, search) + "[" + (end - start) + "s]))";
+        String logql = "sum(count_over_time(" + buildPipeline(kind, query, search) + "[" + (end - start) + "s]))";
         String body = lokiClient.instantQuery(logql, anchorNanos);
         try {
             JsonNode result = objectMapper.readTree(body).path("data").path("result");
@@ -150,8 +189,9 @@ public class LogsService {
      * taken newest-first, which costs one round trip and gives real random access - at the
      * price of a depth ceiling, reported as depthCapped rather than hidden.
      */
-    public LogPageDto getPage(String query, String search, Long windowSeconds, String anchor,
-                              Integer page, Integer pageSize, String direction) {
+    public LogPageDto getPage(String type, String query, String search, Long windowSeconds,
+                              String anchor, Integer page, Integer pageSize, String direction) {
+        LogKind kind = resolveKind(type);
         long now = System.currentTimeMillis() / 1000;
         long anchorNanos = resolveEndNanos(anchor, now);
         // Both ends of the window hang off the anchor, so a page asked for ten minutes into
@@ -170,7 +210,7 @@ public class LogsService {
         // alone they disagree by one whenever a line sits exactly on a boundary, which shows
         // up as a last page holding one row more than the total allows for. Shifting the
         // evaluation point by 1ns makes the counted span exactly [start, anchor).
-        long total = countLogs(query, search, startSec, anchorNanos - 1).count();
+        long total = countLogs(kind, query, search, startSec, anchorNanos - 1).count();
         int totalPages = total == 0 ? 1 : (int) Math.min(reachablePages, (total + size - 1) / size);
         boolean depthCapped = total > (long) reachablePages * size;
 
@@ -186,7 +226,7 @@ public class LogsService {
 
         int needed = resolvedPage * size;
         String body = lokiClient.queryRange(
-                buildPipeline(query, search),
+                buildPipeline(kind, query, search),
                 startSec * NANOS_PER_SECOND,
                 anchorNanos, needed, resolvedDirection);
 
@@ -221,14 +261,18 @@ public class LogsService {
      * Builds the LogQL: a stream selector, plus a case-insensitive line filter when the
      * user typed something in the search box.
      *
+     * The kind decides the selector only when the caller supplied none. A caller-supplied
+     * ?query= replaces it outright, kind included - the two tables differ by which stream
+     * they select, and a query that names its own stream has already made that choice.
+     *
      * The search term is escaped twice on purpose. It is interpolated into a regular
      * expression inside a quoted LogQL string, so it has to survive both: regex-escaped
      * first so that a "." or "(" in the box matches literally instead of being read as a
      * pattern, then string-escaped so a quote or backslash cannot close the literal early
      * and graft arbitrary LogQL onto the query.
      */
-    String buildPipeline(String query, String search) {
-        String selector = (query != null && !query.isBlank()) ? query.trim() : DEFAULT_SELECTOR;
+    String buildPipeline(LogKind kind, String query, String search) {
+        String selector = (query != null && !query.isBlank()) ? query.trim() : kind.selector();
         selector = forceNamespace(selector);
         if (search == null || search.isBlank()) {
             return selector;
@@ -237,9 +281,9 @@ public class LogsService {
     }
 
     /**
-     * Pins the selector to the configured namespace by adding the label matcher to it.
+     * Pins the selector to the configured namespaces by adding the label matcher to it.
      * Matchers inside a selector are ANDed, so this can only ever narrow what comes back -
-     * a caller asking for another namespace gets an empty result rather than that
+     * a caller asking for a namespace outside the set gets an empty result rather than that
      * namespace's lines.
      *
      * Done here rather than by prefixing DEFAULT_SELECTOR, because ?query= lets the caller
@@ -248,17 +292,44 @@ public class LogsService {
      * No-op when LOKI_NAMESPACE is empty, which is the single-tenant case.
      */
     private String forceNamespace(String selector) {
-        if (namespace.isEmpty()) {
+        if (namespaces.isEmpty()) {
             return selector;
         }
         int[] braces = selectorBraces(selector);
         int open = braces[0];
         int close = braces[1];
         String existing = selector.substring(open + 1, close).trim();
-        String forced = namespaceLabel + "=\"" + logqlString(namespace) + "\"";
+        String forced = namespaceLabel + namespaceMatcher();
         return selector.substring(0, open + 1)
                 + (existing.isEmpty() ? forced : forced + ", " + existing)
                 + selector.substring(close);
+    }
+
+    /**
+     * The matcher's operator and value, for a label already written out by the caller.
+     *
+     * One namespace stays an exact {@code ="ns"} rather than a one-branch alternation: it is
+     * the cheaper matcher for Loki to answer and the plainer one to read in a query log, and
+     * it keeps every existing single-namespace deployment's queries byte-identical.
+     *
+     * Several become {@code =~"a|b"}. Each value is regex-escaped on its own and the bars are
+     * added after, so a namespace holding a metacharacter matches literally instead of
+     * widening the set - escaping the joined string would escape the bars too and leave one
+     * literal namespace called "a|b". Loki anchors a label regex as {@code ^(?:re)$}, so the
+     * alternation binds across the whole value without grouping it here.
+     */
+    private String namespaceMatcher() {
+        if (namespaces.size() == 1) {
+            return "=\"" + logqlString(namespaces.get(0)) + "\"";
+        }
+        StringBuilder alternation = new StringBuilder();
+        for (String ns : namespaces) {
+            if (alternation.length() > 0) {
+                alternation.append('|');
+            }
+            alternation.append(regexEscape(ns));
+        }
+        return "=~\"" + logqlString(alternation.toString()) + "\"";
     }
 
     /**
@@ -327,17 +398,25 @@ public class LogsService {
     }
 
     // one [timestampNanos, line] pair, kept as a pair so the sort below can use the
-    // numeric timestamp rather than its formatted form
-    private record RawLine(long tsNanos, String line) {}
+    // numeric timestamp rather than its formatted form - plus the namespace off the stream
+    // it came out of, which the line itself does not carry
+    private record RawLine(long tsNanos, String line, String namespace) {}
 
     private List<LogEntryDto> parseStreams(String body, int limit) {
         List<RawLine> lines = new ArrayList<>();
         try {
             JsonNode result = objectMapper.readTree(body).path("data").path("result");
             for (JsonNode stream : result) {
+                // Read once per stream rather than per line: every line in a Loki stream
+                // shares its label set by definition. Read under the configured label so a
+                // collector that relabels to kubernetes_namespace still resolves; null when
+                // the stream carries none, which is the whole answer for a Loki that is not
+                // labelled by namespace at all.
+                String namespace = text(stream.path("stream"), namespaceLabel);
                 for (JsonNode value : stream.path("values")) {
                     try {
-                        lines.add(new RawLine(Long.parseLong(value.path(0).asText()), value.path(1).asText()));
+                        lines.add(new RawLine(Long.parseLong(value.path(0).asText()),
+                                value.path(1).asText(), namespace));
                     } catch (NumberFormatException ignored) {
                         // a value pair without a usable timestamp is not a log line
                     }
@@ -352,9 +431,21 @@ public class LogsService {
         return lines.stream().limit(limit).map(this::toEntry).toList();
     }
 
+    /**
+     * Which of the two shapes a line is, decided by the line rather than by the stream it
+     * came out of: a JSON object is one of the plugin's access records, anything else is
+     * read as an nginx error line.
+     *
+     * Content rather than the ?type= the caller asked for, because the two are not always
+     * in agreement. APISIX writes the odd non-JSON line into the access stream, and a Loki
+     * shared with something else can hold either kind under either label. Sniffing costs a
+     * parse that was happening anyway and means neither table can be made to render a line
+     * against the wrong set of fields.
+     */
     private LogEntryDto toEntry(RawLine raw) {
         String timestamp = Instant.ofEpochSecond(raw.tsNanos() / 1_000_000_000L, raw.tsNanos() % 1_000_000_000L)
                 .toString();
+        String tsNanos = String.valueOf(raw.tsNanos());
 
         JsonNode json;
         try {
@@ -362,30 +453,70 @@ public class LogsService {
         } catch (Exception e) {
             json = null;
         }
-        // Not everything in the stream is one of the plugin's records - an error log, or a
-        // line from something else pushing to the same Loki. Keep it readable through raw
-        // instead of dropping it or guessing at fields that are not there.
-        if (json == null || !json.isObject()) {
-            return new LogEntryDto(timestamp, String.valueOf(raw.tsNanos()), null, null, null,
-                    null, null, null, null, null, null, null, raw.line());
-        }
+        return (json == null || !json.isObject())
+                ? errorEntry(raw.namespace(), timestamp, tsNanos, raw.line())
+                : auditEntry(raw.namespace(), timestamp, tsNanos, raw.line(), json);
+    }
 
+    /** The loki-logger plugin's access record, flattened out of its nesting. */
+    private LogEntryDto auditEntry(String namespace, String timestamp, String tsNanos, String line, JsonNode json) {
         JsonNode request = json.path("request");
         JsonNode response = json.path("response");
         return new LogEntryDto(
+                LogKind.AUDIT.param(),
+                namespace,
                 timestamp,
-                String.valueOf(raw.tsNanos()),
+                tsNanos,
                 text(json, "level"),
                 text(json, "route_name"),
-                text(json.path("audit"), "route_id"),
+                // The log_format nests it under audit, and also writes it at the top level.
+                // Either will do; taking both means a trimmed-down format still identifies
+                // the route.
+                firstOf(text(json.path("audit"), "route_id"), text(json, "route_id")),
                 text(request, "request_method"),
                 text(request, "request_path"),
                 text(request, "request_host"),
                 integer(response, "status"),
                 latencyMs(text(response, "upstream_latency_ms")),
-                text(json, "source_addr"),
+                // Production fills `source` from $http_x_forwarded_for; the compose config
+                // adds source_addr from $remote_addr because APISIX leaves the forwarded
+                // header empty on that image. Both mean the caller, so take whichever is set.
+                firstOf(text(json, "source"), text(json, "source_addr")),
                 text(response.path("upstream_endpoint"), "address"),
-                raw.line());
+                null,   // requestId - the access record carries no request id
+                null,   // module    - nothing wrote it but the plugin
+                null,   // message   - the record is the message
+                text(json, "gemeente_code"),
+                line);
+    }
+
+    /** An nginx error line, or - when it matches nothing - its text kept as the message. */
+    private LogEntryDto errorEntry(String namespace, String timestamp, String tsNanos, String line) {
+        NginxErrorLine parsed = NginxErrorLine.parse(line);
+        return new LogEntryDto(
+                LogKind.ERROR.param(),
+                namespace,
+                timestamp,
+                tsNanos,
+                parsed.level(),
+                null,   // routeName - the error log names no route
+                null,   // routeId
+                parsed.method(),
+                parsed.path(),
+                parsed.host(),
+                null,   // status    - no response was logged, this is not the access log
+                null,   // latencyMs
+                parsed.client(),
+                parsed.upstream(),
+                parsed.requestId(),
+                parsed.module(),
+                parsed.message(),
+                null,   // gemeenteCode
+                line);
+    }
+
+    private String firstOf(String preferred, String fallback) {
+        return preferred != null ? preferred : fallback;
     }
 
     private String text(JsonNode node, String field) {

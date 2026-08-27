@@ -6,16 +6,30 @@ import { RangeToggle, buildCodeMaps, RANGE_OPTIONS } from '../PromLineChart/Prom
 import type { RangeLabel } from '../PromLineChart/PromLineChart';
 import { logTableFeatures } from './features';
 import { buildColumns, DEFAULT_HIDDEN_COLUMNS } from './columns';
-import type { LogPage } from './types';
+import type { LogKind, LogPage } from './types';
 import styles from './LokiLogTable.module.css';
 
-export type { LogEntry, LogPage } from './types';
+export type { LogEntry, LogKind, LogPage } from './types';
 
 const PAGE_SIZES = [25, 50, 100];
 
+// What an empty result means, per kind. An empty error log is good news and should not read
+// like something is misconfigured; an empty access log usually means no traffic yet.
+const EMPTY_HINT: Record<LogKind, string> = {
+    audit: 'No log lines yet — send requests through APISIX to populate this table',
+    error: 'No errors logged in this window',
+};
+
 interface LokiLogTableProps {
     title: string;
-    // LogQL selector. Left out, the backend falls back to {app_name="apisix"}.
+    /**
+     * Which of the gateway's two streams to read. Picks the selector server-side
+     * (log_type="audit" or log_type="error") and the column set shown by default - the two
+     * kinds of line share a row shape but almost none of the same columns are worth seeing.
+     */
+    kind: LogKind;
+    // LogQL selector, overriding the one the kind would pick. Rarely wanted: a query names
+    // its own stream, so passing one here makes `kind` cosmetic.
     query?: string;
     defaultPageSize?: number;
     defaultRange?: RangeLabel;
@@ -55,6 +69,7 @@ const NO_ENTRIES: never[] = [];
 
 export const LokiLogTable: React.FC<LokiLogTableProps> = ({
     title,
+    kind,
     query,
     defaultPageSize = 25,
     defaultRange,
@@ -75,8 +90,10 @@ export const LokiLogTable: React.FC<LokiLogTableProps> = ({
     });
     // Time descending is newest-first, which is Loki's `direction=backward`.
     const [sorting, setSorting] = useState<SortingState>([{ id: 'timestamp', desc: true }]);
+    // Seeded from the kind, then owned by the user - the visibility menu is theirs to change
+    // and a later render must not push their choices back to the defaults.
     const [columnVisibility, setColumnVisibility] =
-        useState<ColumnVisibilityState>(DEFAULT_HIDDEN_COLUMNS);
+        useState<ColumnVisibilityState>(() => DEFAULT_HIDDEN_COLUMNS[kind]);
 
     /**
      * The instant the current run of pages is cut from. Held so that paging does not shift
@@ -102,7 +119,7 @@ export const LokiLogTable: React.FC<LokiLogTableProps> = ({
      * Adjusted during render rather than in an effect. An effect would render once with the
      * stale page, then again after correcting it, and fire a throwaway request in between.
      */
-    const resetKey = `${query ?? ''}|${search}|${selectedRange.label}|${sortDesc}|${refreshKey}`;
+    const resetKey = `${kind}|${query ?? ''}|${search}|${selectedRange.label}|${sortDesc}|${refreshKey}`;
     const [seenResetKey, setSeenResetKey] = useState(resetKey);
     if (seenResetKey !== resetKey) {
         setSeenResetKey(resetKey);
@@ -117,6 +134,7 @@ export const LokiLogTable: React.FC<LokiLogTableProps> = ({
         // during render is impure anyway. 0 means the whole retention window.
         const windowSeconds = selectedRange.startOffset ?? 0;
         const p = new URLSearchParams({
+            type: kind,
             windowSeconds: String(windowSeconds),
             page: String(pagination.pageIndex + 1),
             pageSize: String(pagination.pageSize),
@@ -127,7 +145,7 @@ export const LokiLogTable: React.FC<LokiLogTableProps> = ({
         if (search) p.set('search', search);
         if (anchor) p.set('anchor', anchor);
         return `/logs/page?${p}`;
-    }, [query, search, selectedRange.startOffset, pagination, sortDesc, anchor]);
+    }, [kind, query, search, selectedRange.startOffset, pagination, sortDesc, anchor]);
 
     const pageFetch = useFetch<LogPage>(endpoint);
     const data = pageFetch.data;
@@ -192,7 +210,7 @@ export const LokiLogTable: React.FC<LokiLogTableProps> = ({
     if (pageFetch.loading && !data) subtitle = 'Loading…';
     else if (pageFetch.error) subtitle = 'Loki unavailable';
     else if (totalCount === 0 && search) subtitle = `No lines match "${search}" in this window`;
-    else if (totalCount === 0) subtitle = 'No log lines yet — send requests through APISIX to populate this table';
+    else if (totalCount === 0) subtitle = EMPTY_HINT[kind];
     else {
         const window = rangeLabel === 'All' ? 'the retention window' : `the last ${rangeLabel}`;
         const filter = search ? ` matching "${search}"` : '';

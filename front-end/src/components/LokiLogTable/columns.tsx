@@ -1,5 +1,5 @@
 import { createColumnHelper } from '@tanstack/react-table';
-import type { LogEntry } from './types';
+import type { LogEntry, LogKind } from './types';
 import type { logTableFeatures } from './features';
 import styles from './LokiLogTable.module.css';
 
@@ -11,10 +11,23 @@ const formatTime = (iso: string): string => {
 
 const dash = <span className={styles.muted}>—</span>;
 
+// nginx's levels, worst first. Anything above warn is coloured; info and debug are the
+// normal case and would only add noise as a badge.
+const levelClass = (level: string): string | undefined => {
+    if (/^(EMERG|ALERT|CRIT|ERROR)$/.test(level)) return styles.levelError;
+    if (level === 'WARN') return styles.levelWarn;
+    return undefined;
+};
+
 const columnHelper = createColumnHelper<typeof logTableFeatures, LogEntry>();
 
 /**
- * Column definitions.
+ * Column definitions - the union of what both kinds of line carry.
+ *
+ * One set rather than one per kind because the two overlap heavily: an access record and an
+ * error line both name a method, a path, a host, a caller and an upstream. What differs is
+ * which of them are worth showing, and that is column visibility rather than a second table
+ * - see DEFAULT_HIDDEN_COLUMNS below.
  *
  * Built from a factory rather than declared as a constant because the status cell needs the
  * palette, and that is derived from whichever codes are on the page being rendered - data,
@@ -47,6 +60,27 @@ export const buildColumns = (colorMap: Record<string, string>) =>
             cell: info => <span className={styles.muted}>{formatTime(info.getValue())}</span>,
             meta: { label: 'Time' },
         }),
+        // Next to Time because it is provenance rather than content: with the console pinned
+        // to several namespaces the rows arrive merged, and this is the only thing telling
+        // them apart. Pinned to one it reads the same all the way down - hide it from the
+        // visibility menu.
+        columnHelper.accessor('namespace', {
+            header: 'Namespace',
+            cell: info => <span className={styles.muted}>{info.getValue() ?? '—'}</span>,
+            meta: { label: 'Namespace' },
+        }),
+        columnHelper.accessor('level', {
+            header: 'Level',
+            cell: info => {
+                const level = info.getValue();
+                if (level == null) return dash;
+                const severity = levelClass(level);
+                return severity
+                    ? <span className={`${styles.levelBadge} ${severity}`}>{level}</span>
+                    : <span className={styles.muted}>{level}</span>;
+            },
+            meta: { label: 'Level' },
+        }),
         // Falls back to the id because a route without a name still has one, and an unnamed
         // route is more useful identified than blank.
         columnHelper.accessor(row => row.routeName ?? row.routeId, {
@@ -62,12 +96,29 @@ export const buildColumns = (colorMap: Record<string, string>) =>
         }),
         columnHelper.accessor('path', {
             header: 'Path',
-            cell: ({ row, getValue }) => (
-                // A line that never parsed has no path; showing its raw text keeps the row
-                // meaningful instead of rendering an empty cell.
-                <span className={styles.pathCell}><code>{getValue() ?? row.original.raw}</code></span>
-            ),
+            cell: info => {
+                const path = info.getValue();
+                // No raw fallback any more: a line that parses as neither shape now keeps
+                // its text in message, so an empty path here really means the line had none.
+                return path == null ? dash : <span className={styles.pathCell}><code>{path}</code></span>;
+            },
             meta: { label: 'Path' },
+        }),
+        columnHelper.accessor('module', {
+            header: 'Module',
+            cell: info => <span className={styles.muted}>{info.getValue() ?? '—'}</span>,
+            meta: { label: 'Module' },
+        }),
+        columnHelper.accessor('message', {
+            header: 'Message',
+            // The widest column, and the one the error table is really for. Clipped rather
+            // than wrapped so a Lua traceback cannot make one row as tall as the panel -
+            // expanding the row shows it in full.
+            cell: info => {
+                const message = info.getValue();
+                return message == null ? dash : <span className={styles.messageCell}>{message}</span>;
+            },
+            meta: { label: 'Message' },
         }),
         columnHelper.accessor('status', {
             header: 'Status',
@@ -96,19 +147,47 @@ export const buildColumns = (colorMap: Record<string, string>) =>
             meta: { label: 'Host' },
         }),
         columnHelper.accessor('source', {
-            header: 'Source',
+            header: 'Client',
             cell: info => <span className={styles.muted}>{info.getValue() ?? '—'}</span>,
-            meta: { label: 'Source' },
+            meta: { label: 'Client' },
         }),
         columnHelper.accessor('upstream', {
             header: 'Upstream',
             cell: info => <span className={styles.muted}>{info.getValue() ?? '—'}</span>,
             meta: { label: 'Upstream' },
         }),
+        columnHelper.accessor('requestId', {
+            header: 'Request ID',
+            cell: info => {
+                const id = info.getValue();
+                return id == null ? dash : <code className={styles.muted}>{id}</code>;
+            },
+            meta: { label: 'Request ID' },
+        }),
+        columnHelper.accessor('gemeenteCode', {
+            header: 'Gemeente',
+            cell: info => <span className={styles.muted}>{info.getValue() ?? '—'}</span>,
+            meta: { label: 'Gemeente' },
+        }),
     ]);
 
 /**
- * Columns hidden on first load. Ten columns is more than fits comfortably, and these are the
- * ones you go looking for rather than scan - the visibility menu brings them back.
+ * Columns hidden on first load, per kind.
+ *
+ * Mostly this is the other kind's columns, which would be a row of dashes - but not only:
+ * Host, Upstream and Gemeente are filled on an access record and still start hidden,
+ * because fifteen columns is more than fits and those are the ones you go looking for
+ * rather than scan. The visibility menu brings any of them back.
+ *
+ * Level is hidden on the audit table because the plugin writes a constant "INFO" there.
  */
-export const DEFAULT_HIDDEN_COLUMNS = { host: false, source: false, upstream: false };
+export const DEFAULT_HIDDEN_COLUMNS: Record<LogKind, Record<string, boolean>> = {
+    audit: {
+        level: false, module: false, message: false, requestId: false,
+        host: false, source: false, upstream: false, gemeenteCode: false,
+    },
+    error: {
+        route: false, method: false, status: false, latencyMs: false,
+        host: false, source: false, upstream: false, gemeenteCode: false,
+    },
+};

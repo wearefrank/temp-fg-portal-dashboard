@@ -370,8 +370,18 @@ export const Dashboard: React.FC = () => {
                 {/*    subtitle={r => `Via Prometheus: increase(apisix_http_status[${r.promRange}]) grouped by route · ${r.label === 'All' ? 'all time' : `last ${r.label}`}`}*/}
                 {/*    refreshKey={refreshKey}*/}
                 {/*/>*/}
+                {/* Two tables rather than one with a type filter: the gateway keeps its
+                    access records and its error log in separate Loki streams, and the two
+                    have almost no columns in common worth showing side by side. */}
                 <LokiLogTable
                     title="Gateway Access Log"
+                    kind="audit"
+                    defaultPageSize={25}
+                    refreshKey={refreshKey}
+                />
+                <LokiLogTable
+                    title="Gateway Error Log"
+                    kind="error"
                     defaultPageSize={25}
                     refreshKey={refreshKey}
                 />

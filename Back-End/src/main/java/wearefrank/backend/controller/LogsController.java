@@ -12,6 +12,11 @@ import java.util.List;
  * Loki's counterpart to the Prometheus endpoints on {@link MetricsController}: /range is
  * the raw passthrough to build new panels against, /recent is the flattened form the
  * dashboard's log table renders.
+ *
+ * Every endpoint takes a `type` naming which of the gateway's two log streams to read -
+ * "audit" for the access records, "error" for the nginx error log. It is optional and
+ * defaults to audit, so a caller written against the single-stream version of these
+ * endpoints still gets what it used to.
  */
 @RestController
 @RequestMapping("/api/logs")
@@ -26,6 +31,7 @@ public class LogsController {
 
     @GetMapping("/recent")
     public List<LogEntryDto> getRecentLogs(
+            @RequestParam(required = false) String type,
             @RequestParam(required = false) String query,
             @RequestParam(required = false) String search,
             @RequestParam(required = false) Long startTime,
@@ -33,7 +39,7 @@ public class LogsController {
             // does not survive a round trip through a JSON number.
             @RequestParam(required = false) String endCursor,
             @RequestParam(required = false) Integer limit) {
-        return logsService.getRecentLogs(query, search, startTime, endCursor, limit);
+        return logsService.getRecentLogs(type, query, search, startTime, endCursor, limit);
     }
 
     /**
@@ -43,10 +49,11 @@ public class LogsController {
      */
     @GetMapping("/count")
     public LogCountDto countLogs(
+            @RequestParam(required = false) String type,
             @RequestParam(required = false) String query,
             @RequestParam(required = false) String search,
             @RequestParam(required = false) Long startTime) {
-        return logsService.countLogs(query, search, startTime);
+        return logsService.countLogs(type, query, search, startTime);
     }
 
     /**
@@ -55,6 +62,7 @@ public class LogsController {
      */
     @GetMapping("/page")
     public LogPageDto getPage(
+            @RequestParam(required = false) String type,
             @RequestParam(required = false) String query,
             @RequestParam(required = false) String search,
             // How far back from the anchor to look, in seconds. 0 means the retention
@@ -66,17 +74,18 @@ public class LogsController {
             @RequestParam(required = false) Integer pageSize,
             // "forward" walks the window oldest-first; anything else is newest-first.
             @RequestParam(required = false) String direction) {
-        return logsService.getPage(query, search, windowSeconds, anchor, page, pageSize, direction);
+        return logsService.getPage(type, query, search, windowSeconds, anchor, page, pageSize, direction);
     }
 
     @GetMapping("/range")
     public String logRangeQuery(
+            @RequestParam(required = false) String type,
             @RequestParam(required = false) String query,
             @RequestParam(required = false) String search,
             @RequestParam(required = false) Long startTime,
             @RequestParam(required = false) String endCursor,
             @RequestParam(required = false) Integer limit,
             @RequestParam(required = false) String direction) {
-        return logsService.logRangeQuery(query, search, startTime, endCursor, limit, direction);
+        return logsService.logRangeQuery(type, query, search, startTime, endCursor, limit, direction);
     }
 }

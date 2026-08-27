@@ -120,6 +120,18 @@
     text-overflow: ellipsis;
 }
 
+/* Wider than a path - an error message is prose - but still clipped: the plugin dumps its
+   whole configuration into some of them, and a Lua error brings a traceback. Expanding the
+   row shows the line in full. */
+.messageCell {
+    display: inline-block;
+    max-width: 560px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+}
+
 .numeric {
     text-align: right;
     font-variant-numeric: tabular-nums;
@@ -136,6 +148,28 @@
 
 .muted {
     color: var(--text-secondary);
+}
+
+/* Only the levels worth reacting to get a badge. Colouring info as well would make the
+   error table one solid block of colour and say nothing. */
+.levelBadge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.levelError {
+    background: var(--error-color);
+    color: #fff;
+}
+
+/* Dark text, unlike the others: --warning-color is a yellow, and white on it is unreadable
+   in the light theme. */
+.levelWarn {
+    background: var(--warning-color);
+    color: #212529;
 }
 
 /* The full original line, revealed by clicking a row. white-space: pre-wrap so the JSON

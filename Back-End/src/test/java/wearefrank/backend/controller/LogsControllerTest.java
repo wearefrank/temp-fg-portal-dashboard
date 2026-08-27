@@ -26,16 +26,24 @@ class LogsControllerTest {
     @MockitoBean
     LogsService logsService;
 
-    private static final LogEntryDto ENTRY = new LogEntryDto(
-            "2023-11-14T22:13:20Z", "1700000000000000000", "INFO", "centric", "12", "GET", "/anything/x", "apisix",
-            200, 12.0, "172.18.0.4", "172.18.0.7:8080", "{}");
+    private static final LogEntryDto AUDIT_ENTRY = new LogEntryDto(
+            "audit", "gem-a", "2023-11-14T22:13:20Z", "1700000000000000000", "INFO", "centric", "12",
+            "GET", "/anything/x", "apisix", 200, 12.0, "172.18.0.4", "172.18.0.7:8080",
+            null, null, null, "0484", "{}");
+
+    private static final LogEntryDto ERROR_ENTRY = new LogEntryDto(
+            "error", "gem-b", "2023-11-14T22:13:20Z", "1700000000000000000", "WARN", null, null,
+            "GET", "/test/anything", "gw.example.nl", null, null, "109.94.148.130",
+            "http://100.65.84.218:80/anything", "d5ea29ea7e7f00b9", "[lua] plugin.lua:898",
+            "conf_version(): loaded", null, "2026/08/26 ...");
 
     @Test
     void getRecentLogs_returnsFlattenedEntries() throws Exception {
-        when(logsService.getRecentLogs(null, null, null, null, null)).thenReturn(List.of(ENTRY));
+        when(logsService.getRecentLogs(null, null, null, null, null, null)).thenReturn(List.of(AUDIT_ENTRY));
 
         mockMvc.perform(get("/api/logs/recent"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].type").value("audit"))
                 .andExpect(jsonPath("$[0].routeName").value("centric"))
                 .andExpect(jsonPath("$[0].method").value("GET"))
                 .andExpect(jsonPath("$[0].status").value(200))
@@ -44,20 +52,38 @@ class LogsControllerTest {
                 .andExpect(jsonPath("$[0].timestamp").value("2023-11-14T22:13:20Z"));
     }
 
+    /** The other table's row shape, over the same endpoint. */
+    @Test
+    void getRecentLogs_returnsTheErrorFields_forTheErrorStream() throws Exception {
+        when(logsService.getRecentLogs("error", null, null, null, null, null)).thenReturn(List.of(ERROR_ENTRY));
+
+        mockMvc.perform(get("/api/logs/recent").param("type", "error"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].type").value("error"))
+                .andExpect(jsonPath("$[0].level").value("WARN"))
+                .andExpect(jsonPath("$[0].module").value("[lua] plugin.lua:898"))
+                .andExpect(jsonPath("$[0].message").value("conf_version(): loaded"))
+                .andExpect(jsonPath("$[0].requestId").value("d5ea29ea7e7f00b9"));
+
+        verify(logsService).getRecentLogs("error", null, null, null, null, null);
+    }
+
+    /** No type means the access log, which is what these endpoints answered before. */
     @Test
     void getRecentLogs_worksWithNoParameters() throws Exception {
-        when(logsService.getRecentLogs(null, null, null, null, null)).thenReturn(List.of());
+        when(logsService.getRecentLogs(null, null, null, null, null, null)).thenReturn(List.of());
 
         mockMvc.perform(get("/api/logs/recent"))
                 .andExpect(status().isOk())
                 .andExpect(content().string("[]"));
 
-        verify(logsService).getRecentLogs(null, null, null, null, null);
+        verify(logsService).getRecentLogs(null, null, null, null, null, null);
     }
 
     @Test
     void getRecentLogs_passesQueryStartTimeAndLimit() throws Exception {
-        when(logsService.getRecentLogs("{app_name=\"apisix\"}", null, 1700000000L, null, 50)).thenReturn(List.of(ENTRY));
+        when(logsService.getRecentLogs(null, "{app_name=\"apisix\"}", null, 1700000000L, null, 50))
+                .thenReturn(List.of(AUDIT_ENTRY));
 
         mockMvc.perform(get("/api/logs/recent")
                         .param("query", "{app_name=\"apisix\"}")
@@ -65,7 +91,7 @@ class LogsControllerTest {
                         .param("limit", "50"))
                 .andExpect(status().isOk());
 
-        verify(logsService).getRecentLogs("{app_name=\"apisix\"}", null, 1700000000L, null, 50);
+        verify(logsService).getRecentLogs(null, "{app_name=\"apisix\"}", null, 1700000000L, null, 50);
     }
 
     /**
@@ -81,8 +107,25 @@ class LogsControllerTest {
     }
 
     @Test
+    void getPage_passesTheTypeThrough() throws Exception {
+        mockMvc.perform(get("/api/logs/page").param("type", "error").param("page", "2"))
+                .andExpect(status().isOk());
+
+        verify(logsService).getPage("error", null, null, null, null, 2, null, null);
+    }
+
+    @Test
+    void countLogs_passesTheTypeThrough() throws Exception {
+        mockMvc.perform(get("/api/logs/count").param("type", "error"))
+                .andExpect(status().isOk());
+
+        verify(logsService).countLogs("error", null, null, null);
+    }
+
+    @Test
     void logRangeQuery_returnsBodyUnchanged() throws Exception {
-        when(logsService.logRangeQuery(null, null, null, null, null, null)).thenReturn("{\"status\":\"success\"}");
+        when(logsService.logRangeQuery(null, null, null, null, null, null, null))
+                .thenReturn("{\"status\":\"success\"}");
 
         mockMvc.perform(get("/api/logs/range"))
                 .andExpect(status().isOk())
@@ -91,10 +134,11 @@ class LogsControllerTest {
 
     @Test
     void logRangeQuery_passesAllParameters() throws Exception {
-        when(logsService.logRangeQuery("{app_name=\"apisix\"}", null, 1700000000L, null, 10, "forward"))
+        when(logsService.logRangeQuery("error", "{app_name=\"apisix\"}", null, 1700000000L, null, 10, "forward"))
                 .thenReturn("range-result");
 
         mockMvc.perform(get("/api/logs/range")
+                        .param("type", "error")
                         .param("query", "{app_name=\"apisix\"}")
                         .param("startTime", "1700000000")
                         .param("limit", "10")
@@ -102,6 +146,6 @@ class LogsControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string("range-result"));
 
-        verify(logsService).logRangeQuery("{app_name=\"apisix\"}", null, 1700000000L, null, 10, "forward");
+        verify(logsService).logRangeQuery("error", "{app_name=\"apisix\"}", null, 1700000000L, null, 10, "forward");
     }
 }
