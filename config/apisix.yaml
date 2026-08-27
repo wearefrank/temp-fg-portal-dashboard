@@ -1,64 +1,224 @@
-routes:
-  - id: test-test-test-route
-    uri: /hello
-    upstream_id: 1
-    plugins:
-      limit-count:
-        count: 2
-        time_window: 60
-        rejected_code: 503
-        policy: local
-      response-rewrite:
-        status_code: 200
-        body: "hello\n"
-      prometheus: {}
-  - id: host-test-test-route
-    uri: /world
-    upstream:
-      nodes:
-        httpbin:80: 1
-      type: roundrobin
-    plugins:
-      response-rewrite:
-        status_code: 200
-        body: "hello world\n"
-      prometheus: {}
-  - id: veiligheidenvergunningen-test-test-route
-    uri: /secure-test
-    upstream_id: 1
-    plugins:
-      key-auth: {}
-upstreams:
-  - id: 1
-    nodes:
-      httpbin:80: 1
-    type: roundrobin
-services:
-  - id: 1
-    upstream_id: 1
-    plugins:
-      limit-count:
-        count: 1
-        time_window: 60
-        rejected_code: 503
-      prometheus: {}
+# Frank!Gateway (APISIX) routing config -> mounted at /usr/local/apisix/conf/apisix.yaml
+#
+# LOCAL TEST VERSION of the Alphen aan den Rijn integration config. Everything that
+# reached outside this machine is replaced by a local equivalent; the point of what
+# is left is to exercise the observability stack - loki-logger -> Loki and
+# prometheus -> Prometheus - not the integrations themselves.
+#
+# Dropped from the production config, and why:
+#
+#   ssls:           the server cert and key came from ${{GATEWAY_CERT}} /
+#                   ${{GATEWAY_KEY}}, and the client CA bundle from the iBabs,
+#                   Djuma and Centric CAs. There are no certs here and APISIX
+#                   refuses to load a file with an unresolved ${{...}} placeholder,
+#                   so the section is gone - and with it the 9443 HTTPS listener.
+#   cert-auth:      needs that same client certificate chain. Replaced with
+#                   key-auth, which produces the same 401/403 traffic without a PKI
+#                   and leaves consumer-restriction working unchanged.
+#   ip-restriction: the whitelist held the partners' public IPs, which rejects every
+#                   request that can be made from this machine.
+#   host:           routes matched integration-test.alphenaandenrijn.nl, so every
+#                   local call needed a Host header. Dropped - they match on path.
+#   upstreams:      Centric and Djuma pointed at real HTTPS endpoints with client
+#                   certs. They are now two local containers, one each, so the
+#                   upstream_addr / upstream_host fields in the log format below
+#                   still differ per route.
+#
+# The real config is kept in scratchpad/apisix.production.yaml for diffing.
+#
+# Start the backends and the traffic generator with:
+#   docker compose --profile test up -d
+#
+# APISIX re-reads this file about once a second, so saving it is enough. The `#END`
+# marker at the bottom is required.
+
 consumers:
-  - username: jacks
+  # Same usernames as production, so the consumer-restriction whitelists on the
+  # routes below are untouched. Only the credential type changed.
+  - username: "test-org-client-allowed"
     plugins:
       key-auth:
-        key: auth-one
-  - username: rose
+        key: test-org-key
+  - username: "djuma-client-allowed"
     plugins:
-      basic-auth:
-        username: rose
-        password: rose-password
+      key-auth:
+        key: djuma-key
+  - username: "centric-client-allowed"
+    plugins:
+      key-auth:
+        key: centric-key
+  - username: "ibabs-client-allowed"
+    plugins:
+      key-auth:
+        key: ibabs-key
+
+routes:
+  # ---- The three production routes, kept intact apart from auth and host --------
+  - id: djuma-to-centric-route
+    name: djuma-to-centric-route
+    uri: /djuma/clo/*
+    upstream_id: centric-sender
+    plugins:
+      key-auth: {}
+      consumer-restriction:
+        whitelist:
+          - "djuma-client-allowed"
+      proxy-rewrite:
+        regex_uri:
+          - "^/djuma/clo/?(.*)"
+          # Production rewrites to the bare .svc path; /anything/ in front of it
+          # makes the local backend answer 200 instead of 404 while keeping the
+          # path visible in the logs.
+          - "/anything/Conductor.Routing/AsynchroneRoutingService.svc"
+
+  - id: centric-to-djuma-route
+    name: centric-to-djuma-route
+    uri: /clo/djuma/*
+    upstream_id: djuma-sender
+    plugins:
+      key-auth: {}
+      consumer-restriction:
+        whitelist:
+          - "centric-client-allowed"
+      proxy-rewrite:
+        regex_uri:
+          - "^/clo/djuma/?(.*)"
+          - "/anything/$1"
+
+  - id: ibabs-to-djuma-route
+    name: ibabs-to-djuma-route
+    uri: /ibabs/djuma/*
+    upstream_id: djuma-sender
+    plugins:
+      key-auth: {}
+      consumer-restriction:
+        whitelist:
+          - "ibabs-client-allowed"
+      proxy-rewrite:
+        regex_uri:
+          - "^/ibabs/djuma/?(.*)"
+          - "/anything/$1"
+
+  # ---- Local only: knobs for producing specific metrics and log lines ----------
+  # No auth on these, so the traffic generator can ask for an exact status code or
+  # an exact upstream latency. Delete this block before comparing with production.
+  - id: local-status
+    name: local-status
+    uri: /local/status/*
+    upstream_id: djuma-sender
+    plugins:
+      proxy-rewrite:
+        regex_uri:
+          - "^/local/status/(.*)"
+          - "/status/$1"
+
+  - id: local-delay
+    name: local-delay
+    uri: /local/delay/*
+    upstream_id: centric-sender
+    plugins:
+      proxy-rewrite:
+        regex_uri:
+          - "^/local/delay/(.*)"
+          - "/delay/$1"
+
+upstreams:
+  # Both are go-httpbin containers. Two of them rather than one shared instance so
+  # $upstream_addr and $upstream_host differ per route in the logs, the way they do
+  # in production.
+  #
+  # Production had `scheme: https`, `pass_host: node` and a `tls:` block with
+  # client_cert / client_key - all removed.
+  - name: centric-sender
+    id: centric-sender
+    desc: Centric API (local mock)
+    type: roundrobin
+    scheme: http
+    pass_host: node
+    nodes:
+      - host: "centric-mock"
+        port: 8080
+        weight: 1
+
+  - name: djuma-sender
+    id: djuma-sender
+    desc: Djuma API (local mock)
+    type: roundrobin
+    scheme: http
+    pass_host: node
+    nodes:
+      # Production has `- host:` with no value here, which is worth fixing there:
+      # APISIX resolves it to an empty node rather than erroring.
+      - host: "djuma-mock"
+        port: 8080
+        weight: 1
+
 global_rules:
   - id: 1
     plugins:
-      limit-count:
-        count: 100
-        time_window: 60
-        rejected_code: 503
-        key: remote_addr
+      # Production form, kept as-is. Worth knowing before you trust it: the
+      # `source` field it feeds is always empty on this image. APISIX overwrites the
+      # X-Forwarded-For request header before the log phase runs, so
+      # $http_x_forwarded_for resolves to nothing - verified by logging
+      # $http_user_agent and a custom $http_x_test on the same request, both of
+      # which do resolve. real-ip cannot compensate either: nginx only honours it
+      # for proxies listed in real_ip_from, which here is 127.0.0.1 and unix: only.
+      # Add the docker subnet to nginx_config.http.real_ip_from in
+      # config/apisix-config.yaml if you want to exercise that path.
+      real-ip:
+        source: "$http_x_forwarded_for"
+
+      # Not in the production config, and the reason half this stack exists: without
+      # it APISIX exports no per-route metrics at all.
       prometheus: {}
+
+      loki-logger:
+        # Was http://loki-gateway.monitoring.svc.cluster.local:80
+        endpoint_addrs:
+          - http://loki:3100
+        # Ignored by the local Loki, which runs with auth_enabled: false, but kept
+        # so the config still matches production.
+        tenant_id: "local"
+        log_labels:
+          app_instance: "frank-gateway"
+          service_name: "apisix"
+          app_name: "apisix"
+          container: "apisix"
+          level: "INFO"
+          # Were ${{POD_NAME}} and ${{NAMESPACE}}. To keep the placeholders, set
+          # POD_NAME and NAMESPACE on the apisix service in docker-compose.yaml
+          # instead - APISIX interpolates ${{...}} from its own environment.
+          pod: "frank-gateway-local"
+          instance: "local/frank-gateway-local:apisix"
+          namespace: "local"
+          log_type: "audit"
+          # Hier error logs aan toevoegen
+        # Flushes about a second after traffic stops instead of the 60s default, so
+        # log lines show up in Grafana while you are still looking at them.
+        batch_max_size: 20
+        buffer_duration: 5
+        inactive_timeout: 1
+        log_format:
+          level: "INFO"
+          timestamp: "$time_iso8601"
+          gemeente_code: "0484"
+          route_name: "$route_name"
+          source: "$http_x_forwarded_for"
+          # Local addition: unlike `source` above, this one is always present.
+          source_addr: "$remote_addr"
+          request:
+            request_method: "$request_method"
+            request_path: "$uri"
+            request_host: "$host"
+          response:
+            status: "$status"
+            upstream_latency_ms: "$upstream_response_time"
+            upstream_endpoint:
+              scheme: "$upstream_scheme"
+              host: "$upstream_host"
+              uri: "$upstream_uri"
+              query: "$args"
+              address: "$upstream_addr"
+          audit:
+            route_id: "$route_id"
 #END
