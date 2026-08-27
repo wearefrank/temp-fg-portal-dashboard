@@ -36,5 +36,11 @@ public record LogPageDto(
          * oldest-first. Echoed back so the sort indicator reflects what the server actually
          * did rather than what the client asked for.
          */
-        String direction
+        String direction,
+        /**
+         * The column the page was ordered by - a {@link LogField} id, or "timestamp" for
+         * time order. Echoed for the same reason as direction, and it can differ from what
+         * was asked: a column the log has none of falls back to time - see {@link LogSort}.
+         */
+        String sort
 ) {}
