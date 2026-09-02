@@ -74,6 +74,24 @@ public class LokiClient {
         return get(url);
     }
 
+    /**
+     * Range query for metric LogQL - one number per step, rather than the log lines
+     * {@link #queryRange} returns. Same endpoint, but a metric query is parameterised by a
+     * step and has no use for a limit or a direction.
+     *
+     * Loki evaluates at start, start+step, ... up to end, and a {@code count_over_time([step])}
+     * at T covers (T-step, T] - so a caller wanting buckets that tile a window exactly has to
+     * put its first evaluation point one step in, not on the window's edge.
+     */
+    public String metricRangeQuery(String logql, long startNanos, long endNanos, long stepSeconds) {
+        String url = baseUrl + "/loki/api/v1/query_range"
+                + "?query=" + URLEncoder.encode(logql, StandardCharsets.UTF_8)
+                + "&start=" + startNanos
+                + "&end=" + endNanos
+                + "&step=" + stepSeconds;
+        return get(url);
+    }
+
     private String get(String url) {
         try {
             HttpRequest.Builder builder = HttpRequest.newBuilder()

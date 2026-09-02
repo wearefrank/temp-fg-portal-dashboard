@@ -130,11 +130,11 @@
 }
 
 .brand:hover {
-    color: var(--accent-color);
+    color: var(--accent-text);
 }
 
 .brandAccent {
-    color: var(--accent-color);
+    color: var(--accent-text);
 }
 
 .navLinks {
@@ -156,10 +156,12 @@
     background-color: var(--bg-tertiary);
 }
 
+/* The gold edge is what marks the current page - --border-dim is a hairline in dark and
+   all but invisible in light, which left the active link looking like the others. */
 .navLinks a:global(.active) {
     color: var(--text-primary);
     background-color: var(--bg-tertiary);
-    border: 1px solid var(--border-dim);
+    border: 1px solid var(--accent-color);
 }
 
 .headerActions {

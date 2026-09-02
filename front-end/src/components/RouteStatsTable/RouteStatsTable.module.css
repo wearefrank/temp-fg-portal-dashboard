@@ -1,0 +1,276 @@
+/* Same break-out as the log table's, so the two line up down the page. */
+.fullWidthCard {
+    grid-column: 1 / -1;
+    box-sizing: border-box;
+    width: min(1800px, calc(100vw - 3rem));
+    margin-left: 50%;
+    transform: translateX(-50%);
+}
+
+/* The title shares this row with the range picker, so the card's own rule would underline
+   the words rather than the card. The row carries it instead - see the override below. */
+.headerRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-dim);
+}
+
+.headerRow :global(.card-header) {
+    padding-bottom: 0;
+    margin-bottom: 0;
+    border-bottom: none;
+}
+
+.subtitle {
+    margin: 0.5rem 0 0.25rem;
+}
+
+.headerControls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.zoomOutBtn {
+    padding: 0.2rem 0.6rem;
+    font-size: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--button-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.applyToLogsBtn {
+    composes: zoomOutBtn;
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
+.applyToLogsBtn:disabled {
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+    cursor: default;
+}
+
+/* Says what the panel is showing while it is showing something narrower than everything -
+   a filtered view with nothing announcing it is how you end up reading one route's numbers
+   as the gateway's. */
+.selectionChip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin: 0.5rem 0 0;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.8rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+}
+
+.selectionChip button {
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 0 0.2rem;
+}
+
+.selectionChip button:hover {
+    color: var(--text-primary);
+}
+
+.pickable {
+    cursor: pointer;
+}
+
+.pickedRow {
+    background: var(--bg-tertiary);
+    box-shadow: inset 2px 0 0 var(--accent-color);
+}
+
+.zoomHint {
+    margin-left: auto;
+    align-self: center;
+}
+
+/* Two folds of one response, so this switches a re-render rather than a query. */
+.viewToggle {
+    display: flex;
+    gap: 0.25rem;
+    margin: 0.5rem 0 0.25rem;
+}
+
+.viewBtn {
+    padding: 0.15rem 0.6rem;
+    font-size: 0.75rem;
+    border: 1px solid var(--border-dim);
+    border-radius: 4px;
+    background: var(--button-bg);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.viewBtn:hover {
+    color: var(--text-primary);
+}
+
+.viewBtnActive {
+    border-color: var(--border-color);
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/*
+ * The chart's one height: it fills this, and so does the skeleton standing in for it, so the
+ * table below does not jump while a refetch lands. Tall enough that a quiet series is still a
+ * readable line next to a busy one.
+ */
+.chartArea {
+    height: 340px;
+    /* Dragging out a zoom otherwise sweeps the axis labels into a text selection. */
+    user-select: none;
+}
+
+/*
+ * Recharts hangs mouseenter/mouseleave on every bar rectangle and dispatches on each one
+ * without throttling, so a drilled-in bar chart fires hundreds of them per sweep. Nothing here
+ * needs them: the tooltip, the cursor and the drag-to-zoom all read the chart's own handlers.
+ */
+.chartArea :global(.recharts-bar-rectangle) {
+    pointer-events: none;
+}
+
+/* The plot itself, not the skeleton or the legend: says a click or a drag lands here. */
+.chartArea :global(.recharts-surface) {
+    cursor: crosshair;
+}
+
+/* One row per route, so this stays short - it scrolls only if a gateway has many. */
+.tableArea {
+    max-height: 420px;
+    overflow: auto;
+}
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+}
+
+.table th,
+.table td {
+    padding: 0.4rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-dim);
+}
+
+.table th {
+    color: var(--text-secondary);
+    font-weight: 600;
+    white-space: nowrap;
+    /* The header stays put while the body scrolls under it. */
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    z-index: 1;
+}
+
+.table tr:last-child td {
+    border-bottom: none;
+}
+
+.table tbody tr:hover {
+    background: var(--bg-tertiary);
+}
+
+.right {
+    text-align: right;
+}
+
+.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.sortable:hover {
+    color: var(--text-primary);
+}
+
+/* Always occupies its space, so turning a column does not shift the header text. */
+.sortMark {
+    display: inline-block;
+    width: 0.9em;
+    margin-left: 0.15rem;
+}
+
+/* The route's path, under its name rather than beside it - a name plus a path on one line
+   is what pushes the number columns off a narrow screen. */
+.uri {
+    display: block;
+    margin-top: 0.1rem;
+}
+
+/* 4xx has no shared class: a rejected caller is neither success nor failure, and painting
+   it with either is the misreading this column exists to prevent. */
+.clientError {
+    color: var(--warning-color);
+}
+
+.statusDot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.statusDotOnline  { background-color: var(--success-color); }
+.statusDotOffline { background-color: var(--error-color); }
+.statusDotUnknown { background-color: var(--text-secondary); opacity: 0.4; }
+
+.empty {
+    padding: 1rem 0.75rem;
+}
+
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+.skeletonCell {
+    display: inline-block;
+    width: 70%;
+    height: 12px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-dim) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+}
+
+/* Same height as the chart it stands in for, so the table below does not jump. */
+.chartSkeleton {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-dim) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skeletonCell,
+    .chartSkeleton {
+        animation: none;
+    }
+}

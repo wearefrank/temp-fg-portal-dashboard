@@ -9,6 +9,7 @@ import {
     inputBounds,
     loadRange,
     seedInputs,
+    rangeCanChange,
     rangeKey,
     rangeLabel,
     rangeToQuery,
@@ -280,5 +281,40 @@ describe('loadRange / saveRange', () => {
         // backend turns into a 502.
         localStorage.setItem('fg-log-range:audit', JSON.stringify({ kind: 'absolute', fromMs: 2000, toMs: 1000 }));
         expect(loadRange('audit')).toBeNull();
+    });
+});
+
+describe('rangeCanChange', () => {
+    const NOW = 1_700_000_000_000;
+    const MINUTE = 60_000;
+
+    /** It moves with the clock, so there is always something new at the near end. */
+    it('is always true for a relative range', () => {
+        expect(rangeCanChange({ kind: 'relative', seconds: 3600 }, NOW)).toBe(true);
+        // 0 is the retention window, which also ends at now.
+        expect(rangeCanChange({ kind: 'relative', seconds: 0 }, NOW)).toBe(true);
+    });
+
+    /**
+     * The gateway batches before pushing, so a window that closed moments ago can still gain
+     * the requests served just before it did.
+     */
+    it('is true for an absolute range that only just closed', () => {
+        expect(rangeCanChange({ kind: 'absolute', fromMs: NOW - MINUTE * 60, toMs: NOW }, NOW)).toBe(true);
+        expect(rangeCanChange({ kind: 'absolute', fromMs: NOW - MINUTE * 60, toMs: NOW - MINUTE * 4 }, NOW))
+            .toBe(true);
+    });
+
+    /** Past the settling time it can only ever answer the same, so polling it is waste. */
+    it('is false once an absolute range has settled', () => {
+        expect(rangeCanChange({ kind: 'absolute', fromMs: NOW - MINUTE * 60, toMs: NOW - MINUTE * 6 }, NOW))
+            .toBe(false);
+        expect(rangeCanChange({ kind: 'absolute', fromMs: NOW - MINUTE * 600, toMs: NOW - MINUTE * 500 }, NOW))
+            .toBe(false);
+    });
+
+    /** A window ending in the future has certainly not closed. */
+    it('is true for an absolute range that has not ended yet', () => {
+        expect(rangeCanChange({ kind: 'absolute', fromMs: NOW, toMs: NOW + MINUTE * 10 }, NOW)).toBe(true);
     });
 });

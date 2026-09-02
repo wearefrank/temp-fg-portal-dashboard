@@ -42,5 +42,11 @@ public record LogPageDto(
          * time order. Echoed for the same reason as direction, and it can differ from what
          * was asked: a column the log has none of falls back to time - see {@link LogSort}.
          */
-        String sort
+        String sort,
+        /**
+         * The column the search was confined to, or null when it ran over the whole line.
+         * Echoed like sort and for the same reason: a column this log has none of falls back
+         * to searching everywhere - see {@link LogSearchField}.
+         */
+        String searchField
 ) {}

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Link } from 'react-router-dom';
 import { ThemeToggle } from '../ThemeToggle/ThemeToggle';
 import { useConfigManager } from '../../hooks/useConfigManager';
@@ -14,7 +14,7 @@ interface CurrentUser {
   groups?: string[];
 }
 
-const StatusDot: React.FC<{ status: Status; label: string }> = ({ status, label }) => (
+const StatusDot = ({ status, label }: { status: Status; label: string }) => (
   <div className={styles.indicator}>
     <span className={
       status === 'ok'    ? 'text-success' :
@@ -24,7 +24,7 @@ const StatusDot: React.FC<{ status: Status; label: string }> = ({ status, label 
   </div>
 );
 
-export const Header: React.FC = () => {
+export const Header = () => {
   const { fetchSchema } = useConfigManager();
   const [schemaStatus, setSchemaStatus]   = useState<Status>('checking');
   const [controlStatus, setControlStatus] = useState<Status>('checking');
@@ -93,18 +93,18 @@ export const Header: React.FC = () => {
         </nav>
 
         <div className={styles.headerActions}>
-          <div className={styles.statusIndicators}>
-            <StatusDot status={schemaStatus}  label="Schema"  />
-            <StatusDot status={controlStatus} label="Control" />
-            <StatusDot status={metricsStatus} label="Metrics" />
-          </div>
-          <button
-            onClick={checkConnections}
-            disabled={isChecking}
-            className={isChecking ? '' : 'btn-primary'}
-          >
-            {isChecking ? 'Checking...' : 'Retry'}
-          </button>
+        {/*  <div className={styles.statusIndicators}>*/}
+        {/*    <StatusDot status={schemaStatus}  label="Schema"  />*/}
+        {/*    <StatusDot status={controlStatus} label="Control" />*/}
+        {/*    <StatusDot status={metricsStatus} label="Metrics" />*/}
+        {/*  </div>*/}
+        {/*  <button*/}
+        {/*    onClick={checkConnections}*/}
+        {/*    disabled={isChecking}*/}
+        {/*    className={isChecking ? '' : 'btn-primary'}*/}
+        {/*  >*/}
+        {/*    {isChecking ? 'Checking...' : 'Retry'}*/}
+        {/*  </button>*/}
           <ThemeToggle />
         </div>
       </div>
@@ -112,24 +112,24 @@ export const Header: React.FC = () => {
       <div className={styles.userCorner}>
         <div className={styles.userSummary} tabIndex={0}>
           <span className={styles.userName}>{user?.name ?? 'Unknown user'}</span>
-          {roles && <span className={styles.userRole}>{roles}</span>}
+          {/*{roles && <span className={styles.userRole}>{roles}</span>}*/}
 
-          {(roles || groups) && (
-            <div className={styles.userDetails} role="tooltip">
-              {roles && (
-                <div className={styles.detailRow}>
-                  <span className={styles.detailLabel}>Roles</span>
-                  <span>{roles}</span>
-                </div>
-              )}
-              {groups && (
-                <div className={styles.detailRow}>
-                  <span className={styles.detailLabel}>Groups</span>
-                  <span>{groups}</span>
-                </div>
-              )}
-            </div>
-          )}
+          {/*{(roles || groups) && (*/}
+          {/*  <div className={styles.userDetails} role="tooltip">*/}
+          {/*    {roles && (*/}
+          {/*      <div className={styles.detailRow}>*/}
+          {/*        <span className={styles.detailLabel}>Roles</span>*/}
+          {/*        <span>{roles}</span>*/}
+          {/*      </div>*/}
+          {/*    )}*/}
+          {/*    {groups && (*/}
+          {/*      <div className={styles.detailRow}>*/}
+          {/*        <span className={styles.detailLabel}>Groups</span>*/}
+          {/*        <span>{groups}</span>*/}
+          {/*      </div>*/}
+          {/*    )}*/}
+          {/*  </div>*/}
+          {/*)}*/}
         </div>
 
         <button onClick={logout} className={styles.logoutButton}>Log out</button>

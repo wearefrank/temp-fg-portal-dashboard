@@ -1,8 +1,21 @@
+/* auto-fit rather than a fixed 3: the container caps at 1200px, so this still lands on
+   three columns on a desktop, but drops to two and then one instead of squeezing five
+   cards into 200px each. The full-width panels below span it with grid-column: 1 / -1. */
 .grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: 1.5rem;
     margin-top: 1.5rem;
+}
+
+.syncIcon {
+    font-size: 1rem;
+    vertical-align: middle;
+    margin-left: 4px;
+}
+
+.countdown {
+    vertical-align: middle;
 }
 
 /* The sync icon turns while a refresh is in flight - the page's only refresh indicator. */
@@ -50,12 +63,6 @@
     margin-top: 0.25rem;
 }
 
-.cardLink {
-    display: inline-block;
-    margin-top: 1rem;
-    font-size: 0.85rem;
-}
-
 .statsList {
     display: flex;
     flex-direction: column;
@@ -86,61 +93,4 @@
 
 .emptyHint {
     margin: 0.75rem 0;
-}
-
-.chartArea {
-    min-height: 260px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.chartAreaMessage {
-    color: var(--text-secondary);
-    font-size: 0.8rem;
-}
-
-.fullWidthCard {
-    grid-column: 1 / -1;
-}
-
-.chartAreaTable {
-    align-items: flex-start;
-}
-
-.routeTable {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85rem;
-    margin-top: 0.5rem;
-}
-
-.routeTable th,
-.routeTable td {
-    padding: 0.4rem 0.75rem;
-    text-align: left;
-    border-bottom: 1px solid var(--border-dim);
-}
-
-.routeTable th {
-    color: var(--text-secondary);
-    font-weight: 600;
-    white-space: nowrap;
-}
-
-.routeTable tr:last-child td {
-    border-bottom: none;
-}
-
-.routeTable tbody tr:hover {
-    background: var(--bg-tertiary);
-}
-
-.codeBadge {
-    display: inline-block;
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #fff;
 }

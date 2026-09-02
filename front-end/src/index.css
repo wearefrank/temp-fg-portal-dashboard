@@ -6,37 +6,52 @@
   color-scheme: light dark;
 
   /* Backgrounds */
-  --bg-color:      light-dark(#f8f9fa, #1e1e1e);
+  --bg-color:      light-dark(#f4f6f8, #1e1e1e);
   --bg-secondary:  light-dark(#ffffff, #252525);
-  --bg-tertiary:   light-dark(#f1f3f5, #2d2d2d);
+  --bg-tertiary:   light-dark(#eceff2, #2d2d2d);
 
-  /* Text */
-  --text-primary:   light-dark(#212529, #eeeeee);
-  --text-secondary: light-dark(#495057, #aaaaaa);
-  --text-muted:     var(--text-secondary);
+  /* Text. Two steps, both readable - muted used to be an alias of secondary, so the
+     hierarchy the class names promise did not exist. */
+  --text-primary:   light-dark(#1f2328, #eeeeee);
+  --text-secondary: light-dark(#59626c, #aaaaaa);
+  --text-muted:     light-dark(#6b7480, #949494);
 
-  /* Borders */
-  --border-color: light-dark(#daa700, #ffc400);
-  --border-dim:   light-dark(rgba(255, 202, 29, 0.15), rgba(253, 195, 0, 0.3));
+  /* Borders. Light draws structure in grey: a saturated gold outline on every card, input
+     and button is what made the light theme read as one long highlighted warning. Dark
+     keeps the gold hairline, which is what separates a card from the background there. */
+  --border-color: light-dark(#d7dce1, #ffc400);
+  --border-dim:   light-dark(#e7ebef, rgba(253, 195, 0, 0.3));
 
-  /* Accent */
-  --accent-color: light-dark(#FDC300, #FDC300);
-  --accent-hover: light-dark(#917000, #e5b000);
+  /* Accent. --accent-color is a fill and is never readable as text on light; --accent-text
+     is its readable form, and --accent-on is what goes on top of a filled accent. */
+  --accent-color:      light-dark(#fdc300, #fdc300);
+  --accent-hover:      light-dark(#e0ab00, #e5b000);
+  --accent-text:       light-dark(#8a6d00, #fdc300);
+  --accent-text-hover: light-dark(#6b5400, #ffd54a);
+  --accent-on:         #1a1a1a;
+  --focus-ring:        light-dark(rgba(224, 171, 0, 0.35), rgba(253, 195, 0, 0.25));
 
-  /* Semantic colors */
-  --success-color: light-dark(#28a745, #63e6be);
-  --error-color:   light-dark(#dc3545, #ff6b6b);
-  --warning-color: light-dark(#ffc107, #f39c12);
+  /* Semantic colors. Each is dark enough to read as text on its own theme, so the paired
+     -on token carries the contrast when the same colour is used as a badge fill. */
+  --success-color: light-dark(#1a7f37, #63e6be);
+  --success-on:    light-dark(#ffffff, #1a1a1a);
+  --error-color:   light-dark(#c62828, #ff6b6b);
+  --error-on:      light-dark(#ffffff, #1a1a1a);
+  /* Amber, not yellow: the old #ffc107 was the accent colour under another name, so a 4xx
+     count and the brand were the same swatch. */
+  --warning-color: light-dark(#b45309, #f39c12);
+  --warning-on:    light-dark(#ffffff, #1a1a1a);
 
   /* Inputs / buttons */
-  --button-bg: light-dark(#e9ecef, #333333);
+  --button-bg: light-dark(#f3f5f7, #333333);
   --input-bg:  light-dark(#ffffff, #333333);
 
-  /* Shadows */
-  --shadow-sm: 0 2px 4px  light-dark(rgba(178, 137, 0, 0.25), rgba(253, 195, 0, 0.25)),
-               0 0   8px  light-dark(rgba(178, 137, 0, 0.15), rgba(253, 195, 0, 0.15));
-  --shadow-md: 0 4px 12px light-dark(rgba(178, 137, 0, 0.5),  rgba(253, 195, 0, 0.5)),
-               0 0   16px light-dark(rgba(178, 137, 0, 0.3),  rgba(253, 195, 0, 0.3));
+  /* Shadows. The glow layer is transparent in light - a halo needs a dark ground, and in
+     light it only smeared gold-brown around every card. */
+  --shadow-color: light-dark(rgba(16, 24, 40, 0.10), rgba(253, 195, 0, 0.25));
+  --shadow-glow:  light-dark(transparent, rgba(253, 195, 0, 0.15));
+  --shadow-sm: 0 1px 2px  var(--shadow-color), 0 0 8px  var(--shadow-glow);
+  --shadow-md: 0 4px 12px var(--shadow-color), 0 0 16px var(--shadow-glow);
 
   /* Layout measurements */
   --header-height: 57px;
@@ -75,12 +90,12 @@ h1, h2, h3, h4 {
 
 a {
   font-weight: 500;
-  color: var(--accent-color);
+  color: var(--accent-text);
   text-decoration: inherit;
 }
 
 a:hover {
-  color: var(--accent-hover);
+  color: var(--accent-text-hover);
 }
 
 /* Layout */
@@ -122,11 +137,15 @@ a:hover {
   margin-bottom: 1rem;
 }
 
+/* A title with a rule under it, not a filled bar: the card pads its content by 20px, so
+   the bar floated inside the card with a gap on all three sides rather than capping it. */
 .card-header {
-  padding: 12px 16px;
-  background-color: var(--bg-tertiary);
+  padding-bottom: 10px;
+  margin-bottom: 14px;
   border-bottom: 1px solid var(--border-dim);
-  font-size: 14px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 /* Form elements */
@@ -159,7 +178,7 @@ a:hover {
 :where(input, textarea, select):focus {
   outline: none;
   border-color: var(--accent-color);
-  box-shadow: 0 0 0 2px rgba(253, 195, 0, 0.2);
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 input[type="file"] {
@@ -168,7 +187,12 @@ input[type="file"] {
   border: 1px solid var(--border-color);
   border-radius: 3px;
   color: var(--text-primary);
-  .button { display: none; }
+}
+
+input[type="file"]::file-selector-button {
+  margin-right: 8px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
 }
 
 /* Buttons */
@@ -198,7 +222,7 @@ button:disabled {
 
 .btn-primary {
   background-color: var(--accent-color);
-  color: #1a1a1a;
+  color: var(--accent-on);
   font-weight: 600;
 }
 
@@ -208,7 +232,7 @@ button:disabled {
 
 .btn-success {
   background-color: var(--success-color);
-  color: white;
+  color: var(--success-on);
 }
 
 .btn-success:hover:not(:disabled) {
@@ -222,7 +246,7 @@ button:disabled {
 }
 
 .btn-outline-success:hover:not(:disabled) {
-  background-color: var(--border-dim);
+  background-color: var(--bg-tertiary);
 }
 
 /* Icon button (ThemeToggle etc.) */
@@ -245,7 +269,7 @@ button:disabled {
 }
 
 .icon-btn:focus-visible {
-  outline: 2px solid var(--border-dim);
+  outline: 2px solid var(--accent-color);
   outline-offset: 2px;
 }
 
@@ -293,7 +317,7 @@ button:disabled {
 /* Text utilities */
 
 .text-small   { font-size: 0.75rem; }
-.text-muted   { color: var(--text-secondary); }
+.text-muted   { color: var(--text-muted); }
 .text-success { color: var(--success-color); }
 .text-error   { color: var(--error-color); }
 

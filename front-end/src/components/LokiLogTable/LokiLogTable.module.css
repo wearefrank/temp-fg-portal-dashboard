@@ -45,7 +45,7 @@
     background: linear-gradient(
         90deg,
         transparent 0%,
-        var(--color-primary, #3b82f6) 50%,
+        var(--accent-color) 50%,
         transparent 100%
     );
     background-size: 40% 100%;
@@ -64,12 +64,14 @@
     100% { background-position: 200% 0; }
 }
 
+/* Filled, then swept. It used to run white-to-border-dim-to-white, and in the light theme
+   --border-dim was a translucent yellow: the skeleton was invisible on a white card. */
 .skeletonCell {
     display: inline-block;
     width: 70%;
     height: 12px;
     border-radius: 3px;
-    background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border-dim) 50%, var(--bg-secondary) 75%);
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-dim) 50%, var(--bg-tertiary) 75%);
     background-size: 200% 100%;
     animation: shimmer 1.4s infinite;
 }
@@ -102,6 +104,7 @@
  * control here that comes from elsewhere, and nothing else in the app uses it.
  */
 .controls .search,
+.controls .searchScope,
 .controls .pageSize,
 .controls .toolbarBtn {
     box-sizing: border-box;
@@ -122,6 +125,24 @@
     min-width: 180px;
 }
 
+/* Reads as the left half of the search box rather than as a control of its own: square
+   edges where the two meet, and one border between them instead of two. Width is its own
+   for the reason .pageSize's is - index.css sets every select to 100%. */
+.searchScope {
+    width: auto;
+    max-width: 9rem;
+    padding: 0 0.3rem;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    /* Pulls back the row's 0.5rem gap and one border width, so the two share an edge. */
+    margin-right: calc(-0.5rem - 1px);
+}
+
+.controls .searchScope + .searchWrap .search {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
 .search {
     width: 100%;
     /* Room on the right for the clear button that sits over it. */
@@ -130,7 +151,8 @@
 
 .search:focus {
     outline: none;
-    border-color: var(--color-primary, #3b82f6);
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 /* Buttons in the toolbar row - Columns, and one per namespace. */
@@ -148,9 +170,9 @@
    back to the plain background when the pointer crosses it. */
 .controls .toolbarBtnActive,
 .controls .toolbarBtnActive:hover {
-    background: var(--color-primary, #3b82f6);
-    border-color: var(--color-primary, #3b82f6);
-    color: #fff;
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+    color: var(--accent-on);
     font-weight: 600;
 }
 
@@ -272,13 +294,14 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* Fill and text colour both come from the series palette - see textOn() there, which picks
+   the text from the fill's luminance. */
 .statusBadge {
     display: inline-block;
     padding: 1px 6px;
     border-radius: 4px;
     font-size: 0.75rem;
     font-weight: 600;
-    color: #fff;
 }
 
 .muted {
@@ -297,14 +320,14 @@
 
 .levelError {
     background: var(--error-color);
-    color: #fff;
+    color: var(--error-on);
 }
 
-/* Dark text, unlike the others: --warning-color is a yellow, and white on it is unreadable
-   in the light theme. */
+/* Each semantic colour carries its own contrast pair - the light theme's error red and the
+   dark theme's take opposite text, and a single hardcoded colour fails one of them. */
 .levelWarn {
     background: var(--warning-color);
-    color: #212529;
+    color: var(--warning-on);
 }
 
 /* The full original line, revealed by clicking a row. white-space: pre-wrap so the JSON
@@ -369,9 +392,9 @@
 }
 
 .pageBtnActive {
-    background: var(--color-primary, #3b82f6);
-    border-color: var(--color-primary, #3b82f6);
-    color: #fff;
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+    color: var(--accent-on);
     font-weight: 600;
 }
 
@@ -394,16 +417,16 @@
     font-size: 0.78rem;
     font-family: inherit;
     font-variant-numeric: tabular-nums;
-    color: var(--color-primary, #3b82f6);
+    color: var(--accent-text);
     background: transparent;
-    border: 1px solid var(--color-primary, #3b82f6);
+    border: 1px solid var(--accent-color);
     border-radius: 4px;
     cursor: pointer;
 }
 
 .newLinesBadge:hover {
-    color: #fff;
-    background: var(--color-primary, #3b82f6);
+    color: var(--accent-on);
+    background: var(--accent-color);
 }
 
 .columnsMenuWrap {

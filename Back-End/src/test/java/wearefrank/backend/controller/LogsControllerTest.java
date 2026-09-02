@@ -114,7 +114,7 @@ class LogsControllerTest {
         mockMvc.perform(get("/api/logs/page").param("type", "error").param("page", "2"))
                 .andExpect(status().isOk());
 
-        verify(logsService).getPage("error", null, null, null, null, 2, null, null, null);
+        verify(logsService).getPage("error", null, null, null, null, null, 2, null, null, null);
     }
 
     @Test
@@ -124,7 +124,7 @@ class LogsControllerTest {
                         .param("direction", "forward"))
                 .andExpect(status().isOk());
 
-        verify(logsService).getPage(null, null, null, null, null, null, null, "forward", "status");
+        verify(logsService).getPage(null, null, null, null, null, null, null, null, "forward", "status");
     }
 
     @Test
@@ -132,7 +132,7 @@ class LogsControllerTest {
         mockMvc.perform(get("/api/logs/count").param("type", "error"))
                 .andExpect(status().isOk());
 
-        verify(logsService).countLogs("error", null, null, null);
+        verify(logsService).countLogs("error", null, null, null, null);
     }
 
     @Test

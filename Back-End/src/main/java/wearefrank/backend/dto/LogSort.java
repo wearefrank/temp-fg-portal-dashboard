@@ -135,7 +135,8 @@ public final class LogSort {
         return Comparator.comparing(key, Comparator.nullsLast(order));
     }
 
-    private static Object value(LogEntryDto entry, String id) {
+    /** Package-private rather than private: {@link LogSearchField} reads a column the same way. */
+    static Object value(LogEntryDto entry, String id) {
         Method accessor = ACCESSORS.get(id);
         if (accessor == null) return null;
         try {

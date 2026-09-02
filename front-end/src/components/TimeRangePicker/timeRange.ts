@@ -18,7 +18,7 @@ export const QUICK_RANGES = [
     { label: 'Last 24 hours', seconds: 86400 },
     { label: 'Last 2 days', seconds: 172800 },
     { label: 'Last 7 days', seconds: 604800 },
-    { label: 'Everything Loki holds', seconds: 0 },
+    // { label: 'Everything Loki holds', seconds: 0 },
 ] as const;
 
 export const DEFAULT_RANGE: TimeRange = { kind: 'relative', seconds: 3600 };
@@ -26,8 +26,8 @@ export const DEFAULT_RANGE: TimeRange = { kind: 'relative', seconds: 3600 };
 const DAY_MS = 86_400_000;
 
 /**
- * The window as /logs/page takes it: a length, plus the instant it ends at. An absolute
- * range ends where the user said, a relative one at whatever "now" the backend resolves.
+ * Relative:
+ * Absolute:
  */
 export function rangeToQuery(range: TimeRange): { windowSeconds: number; anchor: string | null } {
     if (range.kind === 'relative') return { windowSeconds: range.seconds, anchor: null };
@@ -85,21 +85,21 @@ export function describeRange(range: TimeRange): string {
     if (range.seconds === 0) return 'the retention window';
     return `the last ${formatDuration(range.seconds)}`;
 }
-
-// Whether rows in this window can fall on different days, in which case a time of day on
-// its own is ambiguous. 0 seconds is the retention window, which is days wide.
+/**
+ * Whether rows in this window can fall on different days.
+ * if there are more than 24 hours we have to show what day it was.
+ */
 export function spansMoreThanADay(range: TimeRange): boolean {
     if (range.kind === 'relative') return range.seconds === 0 || range.seconds > 86400;
+
     return range.toMs - range.fromMs > DAY_MS
         || new Date(range.fromMs).toDateString() !== new Date(range.toMs).toDateString();
 }
 
-// <input type="datetime-local"> speaks local time in YYYY-MM-DDTHH:mm.
+// Shifting by the zone offset makes the UTC string read as the local clock
 export function toInputValue(ms: number): string {
-    const d = new Date(ms);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-        + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const offsetMs = new Date(ms).getTimezoneOffset() * 60_000;
+    return new Date(ms - offsetMs).toISOString().slice(0, 16);
 }
 
 export function fromInputValue(value: string): number | null {
@@ -159,7 +159,7 @@ export function inputBounds(fromMs: number | null, toMs: number | null, nowMs: n
     };
 }
 
-/** Why the pair cannot be applied, or null when it can. Typing sidesteps the bounds above. */
+/** Why the pair cannot be applied, or null when it can. */
 export function absoluteProblem(fromMs: number | null, toMs: number | null, nowMs: number): string | null {
     if (fromMs == null || toMs == null) return 'Pick a start and an end';
     if (fromMs >= toMs) return 'The start must come first';
@@ -191,6 +191,31 @@ export function saveRange(kind: string, range: TimeRange): void {
     } catch {
         // Storage can be unavailable or full; the range just does not outlive the session.
     }
+}
+
+/**
+ * How long after a window closes it can still gain lines.
+ *
+ * The gateway's loki-logger plugin batches before pushing - buffer_duration is 60s in the
+ * production config (see the plugin block in config/apisix.yaml) - so a request served just
+ * before a window's end can reach Loki a minute after it. Five minutes clears that with room
+ * to spare, and nothing is lost by waiting: this only decides whether a panel keeps asking.
+ */
+const SETTLED_AFTER_MS = 5 * 60 * 1000;
+
+/**
+ * Whether asking again could return anything new.
+ *
+ * A relative window moves with the clock, so it always can. An absolute one is fixed in the
+ * past: once the log has settled behind it, every refresh re-runs the same query for the same
+ * answer - which for an aggregate over a week is a real amount of work Loki does for nothing.
+ *
+ * A panel on a periodic timer should check this before refetching. It is not a cache: the
+ * reader asking for a refresh, or changing the window, should still go and look.
+ */
+export function rangeCanChange(range: TimeRange, nowMs: number): boolean {
+    if (range.kind === 'relative') return true;
+    return range.toMs > nowMs - SETTLED_AFTER_MS;
 }
 
 function isTimeRange(value: unknown): value is TimeRange {
