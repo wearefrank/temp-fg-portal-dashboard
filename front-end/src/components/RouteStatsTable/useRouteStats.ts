@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState } from 'react';
 import { useFetch } from '../../hooks/useFetch';
 import { useTickWhile } from '../../hooks/useTickWhile';
 import {
-    loadRange,
     rangeCanChange,
     rangeToQuery,
     saveRange,
@@ -10,6 +9,7 @@ import {
 } from '../TimeRangePicker/timeRange';
 import { DEFAULT_SORT, nextSort, sortRoutes, type Sort, type SortKey } from './routeStatsSort';
 import type { RouteStatsResult } from './types';
+import {usePersistedState} from "../../hooks/usePersistedState.ts";
 
 const STORAGE_KEY = 'routeStats';
 
@@ -17,7 +17,8 @@ const DEFAULT_RANGE: TimeRange = { kind: 'relative', seconds: 604800 };
 
 /** Traffic per route over a window, with the zoom and the sort that go with it. */
 export function useRouteStats(refreshKey: number) {
-    const [range, setRange] = useState<TimeRange>(() => loadRange(STORAGE_KEY) ?? DEFAULT_RANGE);
+
+    const [range, setRange] = usePersistedState<TimeRange>(STORAGE_KEY, DEFAULT_RANGE);
     const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
     // The window the first zoom moved away from, so zooming out goes straight back to it
     // however many drags in you are - the picker has no idea where the chart started.

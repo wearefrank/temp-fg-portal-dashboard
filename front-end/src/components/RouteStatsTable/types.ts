@@ -1,3 +1,5 @@
+import type { TimeRange } from '../TimeRangePicker/timeRange';
+
 /** Mirrors RouteStatsDto - one route's traffic over the window. */
 export interface RouteStats {
     // "" for traffic that matched no route at all.
@@ -42,4 +44,10 @@ export interface RouteStatsResult {
     countQuery: string;
     latencyQuery: string;
     routesUnavailable: boolean;
+}
+
+/** One "narrow the log" click: the window, and the route selected at the time. */
+export interface LogFilter {
+    range: TimeRange;
+    route: RouteStats | null;
 }

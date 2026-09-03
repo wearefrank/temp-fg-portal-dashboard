@@ -58,6 +58,22 @@
     cursor: default;
 }
 
+/* Sized against the buttons it stands beside, not the body text. */
+.syncToggle {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.syncToggle input {
+    margin: 0;
+    cursor: pointer;
+}
+
 /* Says what the panel is showing while it is showing something narrower than everything -
    a filtered view with nothing announcing it is how you end up reading one route's numbers
    as the gateway's. */

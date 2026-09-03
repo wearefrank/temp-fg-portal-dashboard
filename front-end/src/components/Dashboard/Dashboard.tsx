@@ -3,7 +3,7 @@ import { useFetch } from '../../hooks/useFetch';
 import { LokiLogTable } from '../LokiLogTable/LokiLogTable';
 import { MessagesCounter } from '../MessagesCounter/MessagesCounter';
 import { RouteStatsTable } from '../RouteStatsTable/RouteStatsTable';
-import type { RouteStats } from '../RouteStatsTable/RouteStatsTable';
+import type { LogFilter, RouteStats } from '../RouteStatsTable/RouteStatsTable';
 import type { TimeRange } from '../TimeRangePicker/timeRange';
 import { ApisixStatusCard } from './ApisixStatusCard';
 import { LiveCard } from './LiveCard';
@@ -29,9 +29,11 @@ export const Dashboard = () => {
 
     const [selectedRoute, setSelectedRoute] = useState<RouteStats | null>(null);
 
-    // used for applying the table range to log range
-    const [logRange, setLogRange] = useState<TimeRange | null>(null);
-    const applyRangeToLogs = useCallback((range: TimeRange) => setLogRange({ ...range }), []);
+    const [logFilter, setLogFilter] = useState<LogFilter | null>(null);
+
+    const applyRangeToLogs = useCallback((range: TimeRange, route: RouteStats | null) => {
+        setLogFilter({range: range, route: route})
+    }, []);
 
     const refreshing = configFetch.loading || routesFetch.loading || upstreamsFetch.loading
         || servicesFetch.loading || lokiHealthFetch.loading;
@@ -78,7 +80,7 @@ export const Dashboard = () => {
                     title="Traffic per Route"
                     selectedRoute={selectedRoute}
                     onSelectRoute={setSelectedRoute}
-                    appliedLogRange={logRange}
+                    appliedLogFilter={logFilter}
                     onApplyRangeToLogs={applyRangeToLogs}
                     refreshKey={refreshKey}
                 />
@@ -87,8 +89,8 @@ export const Dashboard = () => {
                     title="Messages Log"
                     kind="audit"
                     defaultPageSize={25}
-                    search={selectedRoute?.routeId || ''}
-                    range={logRange ?? undefined}
+                    search={logFilter?.route?.routeId ?? ''}
+                    range={logFilter?.range}
                     refreshKey={refreshKey}
                 />
             </div>

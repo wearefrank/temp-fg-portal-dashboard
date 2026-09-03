@@ -56,7 +56,7 @@ public class RouteStatsService {
 
     /** Bucket widths to choose between, coarsest last. Round numbers so the axis reads plainly. */
     private static final long[] STEP_LADDER =
-            {15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21600, 43200, 86400};
+            {5, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21600, 43200, 86400};
     /**
      * Enough buckets that an hour-long outage shows up in a week, few enough to fit the panel.
      * A week lands on hourly buckets.
@@ -189,8 +189,7 @@ public class RouteStatsService {
      * Turns Loki's matrix into one zero-filled series per route and status, folding the totals
      * in on the way. Reindexed by rounding, since Loki sends no sample for an empty bucket.
      */
-    private List<RouteSeriesDto> readSeries(String body, Map<String, Row> rows,
-                                            long firstBucket, long step, int buckets) {
+    private List<RouteSeriesDto> readSeries(String body, Map<String, Row> rows, long firstBucket, long step, int buckets) {
         List<RouteSeriesDto> series = new ArrayList<>();
         try {
             JsonNode result = objectMapper.readTree(body).path("data").path("result");

@@ -1,30 +1,33 @@
-import { memo, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
+import { usePersistedState } from '../../hooks/usePersistedState';
 import { TimeRangePicker } from '../TimeRangePicker/TimeRangePicker';
 import type { TimeRange } from '../TimeRangePicker/timeRange';
-import { applyToLogsState } from './applyToLogs';
+import { applyToLogsState, sameFilter } from './applyToLogs';
 import { RouteTrafficChart } from './RouteTrafficChart';
 import { RouteStatsRow } from './RouteStatsRow';
 import { SelectionChip } from './SelectionChip';
 import { SortableHeader } from './SortableHeader';
+import { SyncToggle } from './SyncToggle';
 import { TrafficViewToggle } from './TrafficViewToggle';
 import { routeStatsSubtitle } from './routeStatsSubtitle';
 import { useRouteStats } from './useRouteStats';
 import { NO_ROUTE_LABEL } from './routeStatsFormat';
 import type { View } from './trafficChartData';
-import type { RouteStats } from './types';
+import type { LogFilter, RouteStats } from './types';
 import styles from './RouteStatsTable.module.css';
 
-export type { RouteSeries, RouteStats, RouteStatsResult } from './types';
+export type { LogFilter, RouteSeries, RouteStats, RouteStatsResult } from './types';
 
 const COLUMN_COUNT = 8;
 const SKELETON_ROWS = 4;
+const SYNC_STORAGE_KEY = 'routeStats:synced';
 
 interface RouteStatsTableProps {
     title: string;
     selectedRoute: RouteStats | null;
     onSelectRoute: (route: RouteStats | null) => void;
-    appliedLogRange: TimeRange | null;
-    onApplyRangeToLogs: (range: TimeRange) => void;
+    appliedLogFilter: LogFilter | null;
+    onApplyRangeToLogs: (range: TimeRange, route: RouteStats | null) => void;
     refreshKey: number;
 }
 
@@ -35,7 +38,7 @@ const RouteStatsPanel = ({
     title,
     selectedRoute,
     onSelectRoute,
-    appliedLogRange,
+    appliedLogFilter,
     onApplyRangeToLogs,
     refreshKey,
 }: RouteStatsTableProps) => {
@@ -44,7 +47,19 @@ const RouteStatsPanel = ({
     const stats = useRouteStats(refreshKey);
     const [view, setView] = useState<View>('status');
 
-    const applyToLogs = applyToLogsState(stats.range, appliedLogRange);
+    const [synced, setSynced] = usePersistedState(SYNC_STORAGE_KEY, false);
+
+    // What a click would push down - compared against what is already applied.
+    const currentFilter: LogFilter = { range: stats.range, route: selectedRoute };
+    const applyToLogs = applyToLogsState(currentFilter, appliedLogFilter, synced);
+
+    // While synced, any window or route change pushes itself down. The guard stops the loop:
+    // every push hands back a new filter object, equal to this one but not identical.
+    useEffect(() => {
+        if (!synced) return;
+        if (sameFilter({ range: stats.range, route: selectedRoute }, appliedLogFilter)) return;
+        onApplyRangeToLogs(stats.range, selectedRoute);
+    }, [synced, stats.range, selectedRoute, appliedLogFilter, onApplyRangeToLogs]);
 
     // Clicking the row that is already picked clears it, so the table is its own way back.
     const pickRoute = (route: RouteStats) => {
@@ -65,17 +80,16 @@ const RouteStatsPanel = ({
             <div className={styles.headerRow}>
                 <div className="card-header">{title}</div>
                 <div className={styles.headerControls}>
-                    {applyToLogs.show && (
-                        <button
-                            type="button"
-                            className={styles.applyToLogsBtn}
-                            onClick={() => onApplyRangeToLogs(stats.range)}
-                            disabled={applyToLogs.disabled}
-                            title={applyToLogs.title}
-                        >
-                            {applyToLogs.label}
-                        </button>
-                    )}
+                    <SyncToggle checked={synced} onChange={setSynced} />
+                    <button
+                        type="button"
+                        className={styles.applyToLogsBtn}
+                        onClick={() => onApplyRangeToLogs(currentFilter.range, currentFilter.route)}
+                        disabled={applyToLogs.disabled}
+                        title={applyToLogs.title}
+                    >
+                        {applyToLogs.label}
+                    </button>
                     {stats.canZoomOut && (
                         <button
                             type="button"

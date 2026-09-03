@@ -1,3 +1,4 @@
+import { readPersisted } from '../../../../hooks/usePersistedState';
 import { configureMonacoYaml, type MonacoYaml } from 'monaco-yaml';
 import type { BeforeMount } from '@monaco-editor/react';
 import type * as MonacoType from 'monaco-editor';
@@ -7,7 +8,8 @@ import type * as MonacoType from 'monaco-editor';
 export let monacoYamlInstance: MonacoYaml | null = null;
 
 export function getMonacoTheme(): string {
-    const saved = localStorage.getItem('theme');
+    // Same key and format as ThemeToggle's usePersistedState, read without a hook.
+    const saved = readPersisted<string | null>('theme', null);
     const isDark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
     return isDark ? 'fedgw-dark' : 'fedgw-light';
 }

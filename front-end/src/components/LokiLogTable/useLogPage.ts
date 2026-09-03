@@ -4,13 +4,13 @@ import { useFetch } from '../../hooks/useFetch';
 import { useTickWhile } from '../../hooks/useTickWhile';
 import {
     DEFAULT_RANGE,
-    loadRange,
     rangeKey,
     rangeToQuery,
     saveRange,
     type TimeRange,
 } from '../TimeRangePicker/timeRange';
 import type { LogKind, LogPage } from './types';
+import {usePersistedState} from "../../hooks/usePersistedState.ts";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -44,7 +44,9 @@ export function useLogPage({
     rangeProp,
     refreshKey,
 }: UseLogPageOptions) {
-    const [range, setRange] = useState<TimeRange>(() => loadRange(kind) ?? defaultRange ?? DEFAULT_RANGE);
+
+    const [range, setRange] = usePersistedState<TimeRange>('logRange', defaultRange ?? DEFAULT_RANGE)
+
     const [searchInput, setSearchInput] = useState(searchProp ?? '');
     // Debounced apart from the input, so typing does not fire a Loki query per keystroke.
     const [search, setSearch] = useState('');
@@ -64,7 +66,7 @@ export function useLogPage({
     const changeRange = useCallback((next: TimeRange) => {
         setRange(next);
         saveRange(kind, next);
-    }, [kind]);
+    }, [kind, setRange]);
 
     useEffect(() => {
         const timer = setTimeout(() => setSearch(searchInput), SEARCH_DEBOUNCE_MS);

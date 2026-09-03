@@ -1,23 +1,17 @@
-import { useState } from 'react';
+import { useMemo } from 'react';
 import { type AppSettings, SETTINGS_DEFAULTS, deepMerge } from '../settings/AppSettings';
+import { usePersistedState } from './usePersistedState.ts';
 
 const STORAGE_KEY = 'app-settings';
 
-function load(): AppSettings {
-    try {
-        return deepMerge(SETTINGS_DEFAULTS, JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}'));
-    } catch {
-        return SETTINGS_DEFAULTS;
-    }
-}
-
 export function useAppSettings(): [AppSettings, (next: AppSettings) => void] {
-    const [settings, setSettingsState] = useState<AppSettings>(load);
+    const [stored, setSettings] = usePersistedState<AppSettings>(STORAGE_KEY, SETTINGS_DEFAULTS);
 
-    function setSettings(next: AppSettings) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-        setSettingsState(next);
-    }
+    // Fold onto the defaults so a blob from an older build still gets new fields.
+    const settings = useMemo(() => {
+        if (typeof stored !== 'object' || stored === null) return SETTINGS_DEFAULTS;
+        return deepMerge(SETTINGS_DEFAULTS, stored);
+    }, [stored]);
 
     return [settings, setSettings];
 }
