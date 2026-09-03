@@ -7,7 +7,8 @@
     <script>
       (function(){
         try{
-          var t = localStorage.getItem('theme');
+          // Key and JSON format must match PERSIST_PREFIX in src/hooks/usePersistedState.ts.
+          var t = JSON.parse(localStorage.getItem('persisted_storage:theme'));
           if(t){ document.documentElement.setAttribute('data-theme', t); }
         }catch(e){}
       })();

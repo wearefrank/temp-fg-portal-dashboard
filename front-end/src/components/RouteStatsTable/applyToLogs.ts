@@ -1,26 +1,38 @@
-import { rangeKey, type TimeRange } from '../TimeRangePicker/timeRange';
+import { rangeKey } from '../TimeRangePicker/timeRange';
+import type { LogFilter } from './types';
 
 export interface ApplyToLogsState {
-    show: boolean;
     disabled: boolean;
     label: string;
     /** button's tooltip. */
     title: string;
 }
 
-/** Whether two windows describe the same span. */
-export function sameRange(a: TimeRange | null, b: TimeRange | null): boolean {
+/**
+ * Whether two filters describe the same window and the same route. Routes compare by id,
+ * not by object - a refetch hands back new RouteStats for the same route.
+ */
+export function sameFilter(a: LogFilter | null, b: LogFilter | null): boolean {
     if (!a || !b) return false;
-    return rangeKey(a) === rangeKey(b);
+    if (rangeKey(a.range) !== rangeKey(b.range)) return false;
+    return (a.route?.routeId ?? null) === (b.route?.routeId ?? null);
 }
 
 export function applyToLogsState(
-    chartRange: TimeRange,
-    appliedRange: TimeRange | null,
+    current: LogFilter,
+    applied: LogFilter | null,
+    synced: boolean,
 ): ApplyToLogsState {
+    if (synced) {
+        return {
+            disabled: true,
+            label: 'Filter syncing to logs',
+            title: ''
+        };
+    }
+
     return {
-        show: true,
-        disabled: sameRange(chartRange, appliedRange),
+        disabled: sameFilter(current, applied),
         label: 'Narrow log below',
         title: 'Narrow the log below to this window',
     };

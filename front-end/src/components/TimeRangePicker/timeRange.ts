@@ -18,7 +18,8 @@ export const QUICK_RANGES = [
     { label: 'Last 24 hours', seconds: 86400 },
     { label: 'Last 2 days', seconds: 172800 },
     { label: 'Last 7 days', seconds: 604800 },
-    // { label: 'Everything Loki holds', seconds: 0 },
+    { label: 'Last 2 weeks', seconds: 1209600 },
+    { label: 'Everything Loki holds', seconds: 0 },
 ] as const;
 
 export const DEFAULT_RANGE: TimeRange = { kind: 'relative', seconds: 3600 };
