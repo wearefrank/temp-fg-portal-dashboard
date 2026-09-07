@@ -1,10 +1,10 @@
 import { useFetch } from '../../hooks/useFetch';
 import type { LogCount } from '../MessagesCounter/messageVolume';
-import type { LogKind } from './types';
 import styles from './LokiLogTable.module.css';
 
 interface NewLinesBadgeProps {
-    kind: LogKind;
+    /** The normalised ?type= - see kindParam. */
+    kind: string;
     query?: string;
     search: string;
     /** The column the search is confined to, so the badge counts what the table shows. */

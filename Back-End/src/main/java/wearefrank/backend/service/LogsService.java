@@ -21,16 +21,18 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Reads logs from Loki, either raw or flattened into rows for the dashboard table.
  *
- * The gateway writes two kinds of line into separate streams, so every entry point takes a
- * {@link LogKind} to say which one to read.
+ * Every entry point takes a ?type= naming the {@link LogKind}s to read - one, or several
+ * comma-separated to get the streams merged into one page.
  */
 @Service
 public class LogsService {
@@ -65,7 +67,7 @@ public class LogsService {
         long now = System.currentTimeMillis() / 1000;
         String resolvedDirection = "forward".equals(direction) ? "forward" : "backward";
         return lokiClient.queryRange(
-                buildPipeline(resolveKind(type), query, search),
+                buildPipeline(scope.resolveKinds(type), query, search),
                 resolveStart(startTime, now) * NANOS_PER_SECOND,
                 resolveEndNanos(endCursor, now),
                 resolveLimit(limit), resolvedDirection);
@@ -77,22 +79,9 @@ public class LogsService {
         return parseStreams(body, resolveLimit(limit));
     }
 
-    /** The columns a table of this kind should draw, in order - see {@link LogFields}. */
+    /** The columns a table of these kinds should draw, in order - see {@link LogFields}. */
     public List<LogFieldDto> describeFields(String type) {
-        return LogFields.describe(resolveKind(type));
-    }
-
-    /**
-     * Which stream the caller means. An unknown kind is a 400 rather than a fall back to
-     * the audit log, where a typo would look like the error log is simply empty.
-     */
-    private LogKind resolveKind(String type) {
-        LogKind kind = LogKind.fromParam(type);
-        if (kind == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "type must be one of audit, error - got: " + type);
-        }
-        return kind;
+        return LogFields.describe(scope.resolveKinds(type));
     }
 
     /**
@@ -120,17 +109,17 @@ public class LogsService {
      * page instead would only ever report the limit back.
      */
     public LogCountDto countLogs(String type, String query, String search, String searchField, Long startTime) {
-        return countLogs(resolveKind(type), query, search, searchField, startTime, null);
+        return countLogs(scope.resolveKinds(type), query, search, searchField, startTime, null);
     }
 
-    LogCountDto countLogs(LogKind kind, String query, String search, String searchField,
+    LogCountDto countLogs(Set<LogKind> kinds, String query, String search, String searchField,
                           Long startTime, Long anchorNanos) {
         long now = System.currentTimeMillis() / 1000;
         // Counted as of the anchor, so the total a pager was drawn from stays put while
         // the user clicks through it.
         long end = anchorNanos != null ? anchorNanos / NANOS_PER_SECOND : now;
         long start = resolveStart(startTime, now);
-        return countBetween(kind, query, search, searchField, start, end, anchorNanos);
+        return countBetween(kinds, query, search, searchField, start, end, anchorNanos);
     }
 
     /**
@@ -140,10 +129,10 @@ public class LogsService {
      * @param evalNanos where to evaluate, or null for now. Must agree with {@code endSec},
      *                  or the counted span is not the one asked for.
      */
-    private LogCountDto countBetween(LogKind kind, String query, String search, String searchField,
+    private LogCountDto countBetween(Set<LogKind> kinds, String query, String search, String searchField,
                                      long startSec, long endSec, Long evalNanos) {
         String column = searchColumn(search, searchField);
-        String pipeline = buildPipeline(kind, query, search, column);
+        String pipeline = buildPipeline(kinds, query, search, column);
         if (column != null) {
             return countColumn(pipeline, search, column, startSec, endSec, evalNanos);
         }
@@ -194,13 +183,13 @@ public class LogsService {
      * Loki's step boundaries instead of to "the last seven days".
      */
     public MessageVolumeDto messageVolume(String type, String query, String search, Long windowSeconds) {
-        LogKind kind = resolveKind(type);
+        Set<LogKind> kinds = scope.resolveKinds(type);
         long window = resolveVolumeWindow(windowSeconds);
         long now = System.currentTimeMillis() / 1000;
         long boundary = now - window;
 
-        LogCountDto currentCount = countBetween(kind, query, search, null, boundary, now, null);
-        LogCountDto previousCount = countBetween(kind, query, search, null,
+        LogCountDto currentCount = countBetween(kinds, query, search, null, boundary, now, null);
+        LogCountDto previousCount = countBetween(kinds, query, search, null,
                 boundary - window, boundary, boundary * NANOS_PER_SECOND);
 
         long current = currentCount.count();
@@ -243,7 +232,7 @@ public class LogsService {
     public LogPageDto getPage(String type, String query, String search, String searchField,
                               Long windowSeconds, String anchor, Integer page, Integer pageSize,
                               String direction, String sort) {
-        LogKind kind = resolveKind(type);
+        Set<LogKind> kinds = scope.resolveKinds(type);
         long now = System.currentTimeMillis() / 1000;
         long anchorNanos = resolveEndNanos(anchor, now);
         // Both ends hang off the anchor, so a page asked for ten minutes into a session
@@ -265,7 +254,7 @@ public class LogsService {
         String resolvedSort = LogSort.resolve(sort);
         String column = searchColumn(search, searchField);
 
-        String pipeline = buildPipeline(kind, query, search, column);
+        String pipeline = buildPipeline(kinds, query, search, column);
         long startNanos = startSec * NANOS_PER_SECOND;
 
         if (column != null) {
@@ -276,7 +265,7 @@ public class LogsService {
         // Evaluated 1ns before the anchor on purpose: count_over_time covers (T-range, T]
         // while query_range covers [start, end), so a line sitting on the boundary would be
         // counted but not returned - a last page holding one row more than the total allows.
-        long total = countLogs(kind, query, search, null, startSec, anchorNanos - 1).count();
+        long total = countLogs(kinds, query, search, null, startSec, anchorNanos - 1).count();
         int totalPages = total == 0 ? 1 : (int) Math.min(reachablePages, (total + size - 1) / size);
         boolean depthCapped = total > (long) budget;
 
@@ -372,9 +361,14 @@ public class LogsService {
         return startTime;
     }
 
-    /** The LogQL for a kind, pinned and line-filtered - see {@link LokiScope#pipeline}. */
+    /** The LogQL for these kinds, pinned and line-filtered - see {@link LokiScope#pipeline}. */
+    String buildPipeline(Set<LogKind> kinds, String query, String search) {
+        return buildPipeline(kinds, query, search, null);
+    }
+
+    /** The single-kind spelling, for tests - no production path builds a pipeline this way. */
     String buildPipeline(LogKind kind, String query, String search) {
-        return buildPipeline(kind, query, search, null);
+        return buildPipeline(EnumSet.of(kind), query, search, null);
     }
 
     /**
@@ -384,8 +378,8 @@ public class LogsService {
      * a superset of the matches and only saves work - see {@link LogSearchField#prefiltersLine}.
      * Otherwise Loki gets an unfiltered pipeline and every match is decided here.
      */
-    String buildPipeline(LogKind kind, String query, String search, String column) {
-        return scope.pipeline(kind, query, LogSearchField.prefiltersLine(column) ? search : null);
+    String buildPipeline(Set<LogKind> kinds, String query, String search, String column) {
+        return scope.pipeline(kinds, query, LogSearchField.prefiltersLine(column) ? search : null);
     }
 
     private int resolveLimit(Integer limit) {
@@ -395,7 +389,7 @@ public class LogsService {
 
     // One [timestampNanos, line] pair, kept numeric so the sort below does not use the
     // formatted timestamp, plus the namespace off the stream - the line itself has none.
-    private record RawLine(long tsNanos, String line, String namespace) {}
+    private record RawLine(long tsNanos, String line, String namespace, LogKind streamKind) {}
 
     private List<LogEntryDto> parseStreams(String body, int limit) {
         List<RawLine> lines = new ArrayList<>();
@@ -406,10 +400,13 @@ public class LogsService {
                 // under the configured label, so a collector that relabels still resolves;
                 // null when the stream carries none.
                 String namespace = text(stream.path("stream"), scope.namespaceLabel());
+                // Also once per stream: which label it carries, so a merged table can still
+                // say which stream a row came out of.
+                LogKind streamKind = streamKind(stream.path("stream"));
                 for (JsonNode value : stream.path("values")) {
                     try {
                         lines.add(new RawLine(Long.parseLong(value.path(0).asText()),
-                                value.path(1).asText(), namespace));
+                                value.path(1).asText(), namespace, streamKind));
                     } catch (NumberFormatException ignored) {
                         // a value pair without a usable timestamp is not a log line
                     }
@@ -445,7 +442,17 @@ public class LogsService {
         }
         return (json == null || !json.isObject())
                 ? errorEntry(raw.namespace(), timestamp, tsNanos, raw.line())
-                : auditEntry(raw.namespace(), timestamp, tsNanos, raw.line(), json);
+                : auditEntry(raw.streamKind(), raw.namespace(), timestamp, tsNanos, raw.line(), json);
+    }
+
+    /**
+     * Which access-record kind a stream's log_type label names - the label is the only thing
+     * telling audit and messages apart. MESSAGES when there is no usable label, that being
+     * what the gateway writes today.
+     */
+    private LogKind streamKind(JsonNode labels) {
+        LogKind kind = LogKind.fromParam(text(labels, "log_type"));
+        return (kind != null && kind.isAccessRecord()) ? kind : LogKind.MESSAGES;
     }
 
     /**
@@ -453,10 +460,11 @@ public class LogsService {
      * what lives in {@link LogFields}, so one declaration serves both the mapping and the
      * columns the dashboard draws.
      */
-    private LogEntryDto auditEntry(String namespace, String timestamp, String tsNanos, String line, JsonNode json) {
+    private LogEntryDto auditEntry(LogKind kind, String namespace, String timestamp, String tsNanos,
+                                   String line, JsonNode json) {
         Map<String, Object> fields = new HashMap<>();
         for (LogField field : LogFields.ALL) {
-            if (!field.fills(LogKind.AUDIT)) continue;
+            if (!field.fills(kind)) continue;
             for (String path : field.auditPaths()) {
                 String value = textAtPath(json, path);
                 // First path that resolves wins - a later one is a fallback, not an override.
@@ -466,7 +474,7 @@ public class LogsService {
                 }
             }
         }
-        return entry(LogKind.AUDIT, namespace, timestamp, tsNanos, line, fields);
+        return entry(kind, namespace, timestamp, tsNanos, line, fields);
     }
 
     /** An nginx error line, or - when it matches nothing - its text kept as the message. */

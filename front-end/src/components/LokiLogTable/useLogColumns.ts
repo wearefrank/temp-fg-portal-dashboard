@@ -4,7 +4,7 @@ import { useFetch } from '../../hooks/useFetch';
 import { buildCodeMaps } from '../chart/palette';
 import { spansMoreThanADay, type TimeRange } from '../TimeRangePicker/timeRange';
 import { buildColumns, defaultVisibility } from './columns';
-import type { LogEntry, LogFieldDescriptor, LogKind } from './types';
+import type { LogEntry, LogFieldDescriptor } from './types';
 
 // A stable identity for the empty case, so a failed fetch does not invalidate the columns memo.
 const NO_FIELDS: never[] = [];
@@ -13,7 +13,7 @@ const NO_FIELDS: never[] = [];
  * The table's columns, described by the server rather than declared here - see LogFields on
  * the back end. A field added to the gateway's log format becomes a column on its own.
  */
-export function useLogColumns(kind: LogKind, entries: LogEntry[], range: TimeRange) {
+export function useLogColumns(kind: string, entries: LogEntry[], range: TimeRange) {
     const fieldsFetch = useFetch<LogFieldDescriptor[]>(`/logs/fields?type=${kind}`);
     const fields = fieldsFetch.data;
 
@@ -22,7 +22,7 @@ export function useLogColumns(kind: LogKind, entries: LogEntry[], range: TimeRan
     // rather than in an effect, which would show every column for a frame first. Once per kind,
     // not per arrival of `fields` - a refetch hands back an equal-but-new array.
     const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({});
-    const [seededKind, setSeededKind] = useState<LogKind | null>(null);
+    const [seededKind, setSeededKind] = useState<string | null>(null);
     if (fields && seededKind !== kind) {
         setSeededKind(kind);
         setColumnVisibility(defaultVisibility(fields));

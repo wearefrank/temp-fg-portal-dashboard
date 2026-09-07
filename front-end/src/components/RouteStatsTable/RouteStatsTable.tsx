@@ -1,5 +1,7 @@
 import { memo, useEffect, useState } from 'react';
 import { usePersistedState } from '../../hooks/usePersistedState';
+import { kindParam } from '../LokiLogTable/logKinds';
+import type { LogKinds } from '../LokiLogTable/types';
 import { TimeRangePicker } from '../TimeRangePicker/TimeRangePicker';
 import type { TimeRange } from '../TimeRangePicker/timeRange';
 import { applyToLogsState, sameFilter } from './applyToLogs';
@@ -24,6 +26,8 @@ const SYNC_STORAGE_KEY = 'routeStats:synced';
 
 interface RouteStatsTableProps {
     title: string;
+    /** Which streams to count - same spelling as LokiLogTable's, so both can share a value. */
+    kind?: LogKinds;
     selectedRoute: RouteStats | null;
     onSelectRoute: (route: RouteStats | null) => void;
     appliedLogFilter: LogFilter | null;
@@ -36,6 +40,7 @@ interface RouteStatsTableProps {
  */
 const RouteStatsPanel = ({
     title,
+    kind = 'messages',
     selectedRoute,
     onSelectRoute,
     appliedLogFilter,
@@ -44,7 +49,7 @@ const RouteStatsPanel = ({
 }: RouteStatsTableProps) => {
 
 
-    const stats = useRouteStats(refreshKey);
+    const stats = useRouteStats(refreshKey, kindParam(kind));
     const [view, setView] = useState<View>('status');
 
     const [synced, setSynced] = usePersistedState(SYNC_STORAGE_KEY, false);

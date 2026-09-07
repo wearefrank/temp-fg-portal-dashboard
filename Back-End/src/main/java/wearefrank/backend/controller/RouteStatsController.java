@@ -34,7 +34,10 @@ public class RouteStatsController {
             @RequestParam(required = false) Long windowSeconds,
             // Nanosecond instant the window ends at; absent means now.
             @RequestParam(required = false) String anchor,
-            @RequestParam(required = false) String search) {
-        return routeStatsService.routeStats(windowSeconds, anchor, search);
+            @RequestParam(required = false) String search,
+            // Which stream to count, or several comma-separated - same spelling as
+            // /api/logs/page, so one control drives the table and the log below it.
+            @RequestParam(required = false) String type) {
+        return routeStatsService.routeStats(windowSeconds, anchor, search, type);
     }
 }

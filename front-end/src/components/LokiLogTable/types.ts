@@ -1,5 +1,9 @@
-// Which of the gateway's two log streams a table reads.
-export type LogKind = 'audit' | 'error';
+// Which of the gateway's log streams a table reads - mirrors Java LogKind. Audit and messages
+// are the same access record under the old label and the current one.
+export type LogKind = 'audit' | 'messages' | 'error';
+
+/** What a table is pointed at: one stream, or several to show merged. */
+export type LogKinds = LogKind | LogKind[];
 
 /**
  * Mirrors Java LogEntryDto.

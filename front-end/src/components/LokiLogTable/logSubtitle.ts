@@ -5,12 +5,25 @@ import type { LogKind } from './types';
 // What an empty result means, per kind. An empty error log is good news and should not read
 // like something is misconfigured.
 const EMPTY_HINT: Record<LogKind, string> = {
-    audit: 'No log lines yet — send requests through APISIX to populate this table',
+    messages: 'No log lines yet — send requests through APISIX to populate this table',
+    // An empty audit stream means the gateway config moved on, not that traffic stopped.
+    audit: 'No lines under the audit label — the gateway writes these as "messages" now',
     error: 'No errors logged in this window',
 };
 
+/**
+ * What an empty table says. Merged, the per-stream hints contradict each other - an empty
+ * error log is good news, an empty access log is not - so the access log's wins.
+ */
+export function emptyHint(kinds: LogKind[]): string {
+    if (kinds.includes('messages')) return EMPTY_HINT.messages;
+    if (kinds.includes('audit')) return EMPTY_HINT.audit;
+    return EMPTY_HINT.error;
+}
+
 export interface LogSubtitleInput {
-    kind: LogKind;
+    /** The streams this table reads, normally one - see kindList. */
+    kinds: LogKind[];
     range: TimeRange;
     search: string;
     /** Label of the column the search is confined to, empty for the whole line. */
@@ -46,7 +59,7 @@ export function logSubtitle(input: LogSubtitleInput): string {
     if (input.totalCount === 0 && input.search) {
         return `No lines match "${input.search}"${describeScope(input)} in this window`;
     }
-    if (input.totalCount === 0) return EMPTY_HINT[input.kind];
+    if (input.totalCount === 0) return emptyHint(input.kinds);
 
     const first = (input.page - 1) * input.pageSize + 1;
     const last = first + input.rowsOnPage - 1;

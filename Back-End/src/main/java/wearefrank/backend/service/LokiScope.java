@@ -8,6 +8,7 @@ import wearefrank.backend.dto.LogKind;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Which Loki this console is allowed to see, and how far back "everything" reaches.
@@ -65,6 +66,21 @@ public class LokiScope {
     }
 
     /**
+     * Which streams a ?type= means - one name, or several comma-separated. Here rather than
+     * in each service so the two endpoints that take the parameter reject the same values
+     * with the same message. An unknown kind is a 400, since falling back would make a typo
+     * look like an empty log.
+     */
+    public Set<LogKind> resolveKinds(String type) {
+        Set<LogKind> kinds = LogKind.fromParams(type);
+        if (kinds == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "type must be one or more of " + LogKind.names() + " - got: " + type);
+        }
+        return kinds;
+    }
+
+    /**
      * Builds the LogQL: a stream selector, plus a case-insensitive line filter when the
      * user typed something in the search box.
      *
@@ -78,8 +94,9 @@ public class LokiScope {
      * pattern, then string-escaped so a quote or backslash cannot close the literal early
      * and graft arbitrary LogQL onto the query.
      */
-    public String pipeline(LogKind kind, String query, String search) {
-        String selector = (query != null && !query.isBlank()) ? query.trim() : kind.selector();
+    public String pipeline(Set<LogKind> kinds, String query, String search) {
+        String selector = (query != null && !query.isBlank())
+                ? query.trim() : LogKind.selectorFor(kinds);
         selector = forceNamespace(selector);
         if (search == null || search.isBlank()) {
             return selector;

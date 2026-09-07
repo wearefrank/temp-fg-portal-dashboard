@@ -15,8 +15,12 @@ const STORAGE_KEY = 'routeStats';
 
 const DEFAULT_RANGE: TimeRange = { kind: 'relative', seconds: 604800 };
 
-/** Traffic per route over a window, with the zoom and the sort that go with it. */
-export function useRouteStats(refreshKey: number) {
+/**
+ * Traffic per route over a window, with the zoom and the sort that go with it. `kind` is the
+ * normalised ?type= - the aggregate query needs it too, or this panel and the log below it
+ * count different streams.
+ */
+export function useRouteStats(refreshKey: number, kind: string) {
 
     const [range, setRange] = usePersistedState<TimeRange>(STORAGE_KEY, DEFAULT_RANGE);
     const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
@@ -28,11 +32,11 @@ export function useRouteStats(refreshKey: number) {
 
         const { windowSeconds, anchor } = rangeToQuery(range);
 
-        const params = new URLSearchParams({ windowSeconds: String(windowSeconds) });
+        const params = new URLSearchParams({ windowSeconds: String(windowSeconds), type: kind });
 
         if (anchor) params.set('anchor', anchor);
         return `/routes/stats?${params}`;
-    }, [range]);
+    }, [range, kind]);
 
     const [dragging, setDragging] = useState(false);
     // tick decides when the refetch happens

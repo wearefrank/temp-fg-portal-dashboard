@@ -4,6 +4,7 @@ import org.springframework.web.bind.annotation.*;
 import wearefrank.backend.dto.LogCountDto;
 import wearefrank.backend.dto.LogEntryDto;
 import wearefrank.backend.dto.LogFieldDto;
+import wearefrank.backend.dto.LogKind;
 import wearefrank.backend.dto.LogPageDto;
 import wearefrank.backend.dto.MessageVolumeDto;
 import wearefrank.backend.service.LogsService;
@@ -15,10 +16,9 @@ import java.util.List;
  * the raw passthrough to build new panels against, /recent is the flattened form the
  * dashboard's log table renders.
  *
- * Every endpoint takes a `type` naming which of the gateway's two log streams to read -
- * "audit" for the access records, "error" for the nginx error log. It is optional and
- * defaults to audit, so a caller written against the single-stream version of these
- * endpoints still gets what it used to.
+ * Every endpoint takes a `type` naming which stream to read - see {@link LogKind} for the
+ * names. Several can be named comma-separated ("messages,error") and come back merged.
+ * Optional, defaulting to messages.
  */
 @RestController
 @RequestMapping("/api/logs")

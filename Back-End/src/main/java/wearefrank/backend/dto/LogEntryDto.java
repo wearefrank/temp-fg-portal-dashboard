@@ -19,7 +19,7 @@ package wearefrank.backend.dto;
  * A line that parses as neither still gets a row, with its text in message and raw.
  */
 public record LogEntryDto(
-        /** {@link LogKind#param()} - "audit" or "error". Decided by the line, not the query. */
+        /** {@link LogKind#param()} - "messages" or "error". Decided by the line, not the query. */
         String type,
         /**
          * The namespace label off the Loki stream the line came out of, null if the stream

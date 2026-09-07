@@ -1,5 +1,7 @@
 package wearefrank.backend.dto;
 
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 
@@ -27,8 +29,9 @@ import java.util.Set;
  */
 public final class LogFields {
 
-    private static final Set<LogKind> BOTH = Set.of(LogKind.AUDIT, LogKind.ERROR);
-    private static final Set<LogKind> AUDIT_ONLY = Set.of(LogKind.AUDIT);
+    private static final Set<LogKind> EVERY_KIND = EnumSet.allOf(LogKind.class);
+    /** Both access-record labels - audit and messages hold the same lines. */
+    private static final Set<LogKind> ACCESS_ONLY = LogKind.accessRecords();
     private static final Set<LogKind> ERROR_ONLY = Set.of(LogKind.ERROR);
     /** Filled, but not worth a column until you go looking for it in the visibility menu. */
     private static final Set<LogKind> NEITHER = Set.of();
@@ -38,7 +41,7 @@ public final class LogFields {
                     List.of("level"), "level", ERROR_ONLY),
 
             new LogField("routeName", "Route", LogFieldType.ROUTE,
-                    List.of("route_name"), null, AUDIT_ONLY),
+                    List.of("route_name"), null, ACCESS_ONLY),
             // Read only so that the Route column above has something to fall back to.
             new LogField("routeId", null, LogFieldType.TEXT,
                     List.of("audit.route_id", "route_id"), null, NEITHER),
@@ -46,9 +49,9 @@ public final class LogFields {
             // Filled by both, but only the audit table starts with it open: on an error line
             // the method rarely adds to what the message and path already say.
             new LogField("method", "Method", LogFieldType.TEXT,
-                    List.of("request.request_method"), "method", AUDIT_ONLY),
+                    List.of("request.request_method"), "method", ACCESS_ONLY),
             new LogField("path", "Path", LogFieldType.PATH,
-                    List.of("request.request_path"), "path", BOTH),
+                    List.of("request.request_path"), "path", EVERY_KIND),
 
             new LogField("module", "Module", LogFieldType.MUTED,
                     List.of(), "module", ERROR_ONLY),
@@ -56,11 +59,11 @@ public final class LogFields {
                     List.of(), "message", ERROR_ONLY),
 
             new LogField("status", "Status", LogFieldType.STATUS,
-                    List.of("response.status"), null, AUDIT_ONLY),
+                    List.of("response.status"), null, ACCESS_ONLY),
             // The log format calls this upstream_latency_ms, but it holds
             // $upstream_response_time, which nginx reports in seconds - hence DURATION.
             new LogField("latencyMs", "Latency", LogFieldType.DURATION,
-                    List.of("response.upstream_latency_ms"), null, AUDIT_ONLY),
+                    List.of("response.upstream_latency_ms"), null, ACCESS_ONLY),
 
             new LogField("host", "Host", LogFieldType.MUTED,
                     List.of("request.request_host"), "host", NEITHER),
@@ -82,15 +85,19 @@ public final class LogFields {
     public static final Set<String> STRUCTURAL =
             Set.of("type", "namespace", "timestamp", "tsNanos", "raw");
 
-    /** What {@code /api/logs/fields} answers for one kind: its columns, in order. */
-    public static List<LogFieldDto> describe(LogKind kind) {
+    /**
+     * What {@code /api/logs/fields} answers: the columns for these kinds, in order. A column
+     * starts open when any of the kinds would open it, or a merged table would draw the
+     * error log's rows as a line of dashes.
+     */
+    public static List<LogFieldDto> describe(Set<LogKind> kinds) {
         return ALL.stream()
                 .filter(LogField::hasColumn)
                 .map(field -> new LogFieldDto(
                         field.id(),
                         field.label(),
                         field.type(),
-                        field.visibleFor().contains(kind),
+                        !Collections.disjoint(field.visibleFor(), kinds),
                         field.alignRight() ? "right" : null))
                 .toList();
     }

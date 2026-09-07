@@ -14,7 +14,15 @@ import { RefreshIndicator } from './RefreshIndicator';
 import { useControlStatus } from './useControlStatus';
 import { useDashboardRefresh } from './useDashboardRefresh';
 import type { ConnectionConfig, LiveRoute, LiveService, LiveUpstream } from './dashboardTypes';
+import type { LogKinds } from '../LokiLogTable/types';
 import styles from './Dashboard.module.css';
+
+/**
+ * Which streams the three Loki panels read. One constant, or the counter, the per-route
+ * table and the log quietly disagree about what a message is. Both access labels here, so
+ * lines from before the gateway config renamed it still count.
+ */
+const LOG_KIND: LogKinds = ['messages', 'audit'];
 
 export const Dashboard = () => {
     const refreshKey = useDashboardRefresh();
@@ -46,7 +54,7 @@ export const Dashboard = () => {
             </h1>
 
             <div className={styles.grid}>
-                <MessagesCounter title="Messages Handled" refreshKey={refreshKey} />
+                <MessagesCounter title="Messages Handled" kind={LOG_KIND} refreshKey={refreshKey} />
 
                 <ApisixStatusCard
                     status={controlStatus}
@@ -78,6 +86,7 @@ export const Dashboard = () => {
 
                 <RouteStatsTable
                     title="Traffic per Route"
+                    kind={LOG_KIND}
                     selectedRoute={selectedRoute}
                     onSelectRoute={setSelectedRoute}
                     appliedLogFilter={logFilter}
@@ -87,7 +96,7 @@ export const Dashboard = () => {
 
                 <LokiLogTable
                     title="Messages Log"
-                    kind="audit"
+                    kind={LOG_KIND}
                     defaultPageSize={25}
                     search={logFilter?.route?.routeId ?? ''}
                     range={logFilter?.range}

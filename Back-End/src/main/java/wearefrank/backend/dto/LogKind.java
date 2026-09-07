@@ -1,63 +1,124 @@
 package wearefrank.backend.dto;
 
+import java.util.EnumSet;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 /**
- * The two kinds of line the gateway puts into Loki, and the stream each one lives in.
+ * The streams the gateway writes into Loki, one constant per log_type label.
  *
- * They are separate streams rather than one: the loki-logger plugin labels its access
- * records log_type="audit" (see loki-logger.log_labels in config/apisix.yaml) and the
- * nginx error log ships under log_type="error". Selecting on that label keeps the split
- * server-side, so a page of one kind is never cut short by rows of the other having been
- * filtered out of it - which is also why the dashboard draws two tables rather than one
- * with a type filter.
- *
- * The kind picks the stream. It does not decide how a line is read: {@code LogsService}
- * parses on content, so a stray error line in the audit stream still comes back as one.
+ * The kind picks the stream, not how a line is read: {@code LogsService} parses on content,
+ * so a stray error line in an access stream still comes back as one.
  */
 public enum LogKind {
 
-    /** The loki-logger plugin's structured access record - one JSON object per request. */
-    AUDIT("audit", "{app_name=\"apisix\", log_type=\"audit\"}"),
+    /** The access record's old label. Kept selectable for Lokis still holding those lines. */
+    AUDIT("audit", true),
+
+    /** The access record, under the label config/apisix.yaml writes today. */
+    MESSAGES("messages", true),
 
     /** APISIX's nginx error log - plain text, taken apart by {@code NginxErrorLine}. */
-    ERROR("error", "{app_name=\"apisix\", log_type=\"error\"}");
+    ERROR("error", false);
+
+    private static final String APP_MATCHER = "app_name=\"apisix\"";
 
     private final String param;
-    private final String selector;
+    private final boolean accessRecord;
 
-    LogKind(String param, String selector) {
+    LogKind(String param, boolean accessRecord) {
         this.param = param;
-        this.selector = selector;
+        this.accessRecord = accessRecord;
     }
 
-    /** The ?type= spelling, and the value that lands in {@link LogEntryDto#type()}. */
+    /**
+     * The ?type= spelling, the log_type label value, and {@link LogEntryDto#type()}. One
+     * string for all three, so there is nothing to keep in step.
+     */
     public String param() {
         return param;
     }
 
-    /** The LogQL stream selector used when the caller supplies no ?query= of their own. */
-    public String selector() {
-        return selector;
+    /**
+     * Whether this stream carries the loki-logger plugin's JSON access record. Audit and
+     * messages are the same lines under two labels, so anything about the shape of a line
+     * asks this rather than testing for one constant.
+     */
+    public boolean isAccessRecord() {
+        return accessRecord;
+    }
+
+    /** Every kind carrying an access record. */
+    public static Set<LogKind> accessRecords() {
+        return EnumSet.allOf(LogKind.class).stream()
+                .filter(LogKind::isAccessRecord)
+                .collect(Collectors.toCollection(() -> EnumSet.noneOf(LogKind.class)));
     }
 
     /**
-     * Resolves the ?type= parameter, or null when it names no kind.
-     *
-     * Absent means AUDIT: that is the log the dashboard asked for before there was a second
-     * kind, and keeping it the default leaves the existing endpoints answering as they did.
-     * An unrecognised value comes back null rather than silently falling back, so the caller
-     * can reject it - a typo quietly serving the access log is how you end up convinced the
-     * error log is empty.
+     * The stream selector used when the caller supplies no ?query= of their own: an exact
+     * match for one kind, an alternation for several. The labels are literal words, so
+     * nothing here needs regex-escaping.
+     */
+    public static String selectorFor(Set<LogKind> kinds) {
+        if (kinds == null || kinds.isEmpty()) {
+            throw new IllegalArgumentException("a selector needs at least one kind");
+        }
+        // An EnumSet so the alternation comes out in declaration order whatever was passed.
+        EnumSet<LogKind> ordered = EnumSet.copyOf(kinds);
+        if (ordered.size() == 1) {
+            return "{" + APP_MATCHER + ", log_type=\"" + ordered.iterator().next().param + "\"}";
+        }
+        String alternation = ordered.stream().map(LogKind::param).collect(Collectors.joining("|"));
+        return "{" + APP_MATCHER + ", log_type=~\"" + alternation + "\"}";
+    }
+
+    /**
+     * One ?type= name, or null when it names no kind. Absent means MESSAGES, the label the
+     * gateway writes today. A typo comes back null rather than falling back, since quietly
+     * serving the wrong stream reads as one that is simply empty.
      */
     public static LogKind fromParam(String param) {
         if (param == null || param.isBlank()) {
-            return AUDIT;
+            return MESSAGES;
         }
-        String trimmed = param.trim();
+        String trimmed = param.trim().toLowerCase(Locale.ROOT);
         for (LogKind kind : values()) {
-            if (kind.param.equalsIgnoreCase(trimmed)) {
+            if (kind.param.equals(trimmed)) {
                 return kind;
             }
         }
         return null;
+    }
+
+    /**
+     * A comma-separated ?type=, e.g. "audit,messages". Null when any name is unknown - the
+     * whole request is rejected rather than half-honoured. Blanks are dropped, so a trailing
+     * comma asks for what is actually named.
+     */
+    public static Set<LogKind> fromParams(String param) {
+        if (param == null || param.isBlank()) {
+            return EnumSet.of(MESSAGES);
+        }
+        EnumSet<LogKind> kinds = EnumSet.noneOf(LogKind.class);
+        for (String name : param.split(",")) {
+            if (name.isBlank()) {
+                continue;
+            }
+            LogKind kind = fromParam(name);
+            if (kind == null) {
+                return null;
+            }
+            kinds.add(kind);
+        }
+        return kinds.isEmpty() ? EnumSet.of(MESSAGES) : kinds;
+    }
+
+    /** Every ?type= name a caller may pass, for the message on a rejected one. */
+    public static String names() {
+        return EnumSet.allOf(LogKind.class).stream()
+                .map(LogKind::param)
+                .collect(Collectors.joining(", "));
     }
 }

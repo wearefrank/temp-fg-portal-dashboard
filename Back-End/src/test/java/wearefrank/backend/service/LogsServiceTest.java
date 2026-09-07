@@ -15,6 +15,8 @@ import wearefrank.backend.dto.LogPageDto;
 import wearefrank.backend.dto.MessageVolumeDto;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,6 +43,8 @@ class LogsServiceTest {
 
     /** What the audit selector resolves to when the caller supplies no query of their own. */
     private static final String AUDIT = "{app_name=\"apisix\", log_type=\"audit\"}";
+    /** The access log's current label, and so what an absent ?type= selects. */
+    private static final String MESSAGES = "{app_name=\"apisix\", log_type=\"messages\"}";
     private static final String ERROR = "{app_name=\"apisix\", log_type=\"error\"}";
 
     /**
@@ -159,7 +163,7 @@ class LogsServiceTest {
 
         assertThat(entries).hasSize(1);
         LogEntryDto entry = entries.getFirst();
-        assertThat(entry.type()).isEqualTo("audit");
+        assertThat(entry.type()).isEqualTo("messages");
         assertThat(entry.timestamp()).isEqualTo("2023-11-14T22:13:20Z");
         assertThat(entry.level()).isEqualTo("INFO");
         assertThat(entry.routeName()).isEqualTo("centric");
@@ -310,7 +314,7 @@ class LogsServiceTest {
         lokiReturns(streams(stream(TS, ACCESS_LINE)));
 
         assertThat(logsService.getRecentLogs("error", null, null, null, null, null).getFirst().type())
-                .isEqualTo("audit");
+                .isEqualTo("messages");
     }
 
     /**
@@ -338,7 +342,7 @@ class LogsServiceTest {
 
         logsService.getRecentLogs(null, null, null, null, null, null);
 
-        verify(lokiClient).queryRange(eq(AUDIT), anyLong(), anyLong(), anyInt(), anyString());
+        verify(lokiClient).queryRange(eq(MESSAGES), anyLong(), anyLong(), anyInt(), anyString());
     }
 
     @Test
@@ -368,7 +372,7 @@ class LogsServiceTest {
         assertThatThrownBy(() -> logsService.getRecentLogs("warnings", null, null, null, null, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("400")
-                .hasMessageContaining("audit, error");
+                .hasMessageContaining("messages, error");
     }
 
     @Test
@@ -397,7 +401,7 @@ class LogsServiceTest {
 
         logsService.logRangeQuery(null, "  ", null, null, null, null, null);
 
-        verify(lokiClient).queryRange(eq(AUDIT), anyLong(), anyLong(), anyInt(), anyString());
+        verify(lokiClient).queryRange(eq(MESSAGES), anyLong(), anyLong(), anyInt(), anyString());
     }
 
     @Test
@@ -727,7 +731,7 @@ class LogsServiceTest {
         when(lokiClient.instantQuery(anyString(), any())).thenReturn(vector("3"));
 
         assertThat(pinnedTo("acceptance", "namespace").countLogs(null, null, null, null, null).query())
-                .startsWith("sum(count_over_time({namespace=\"acceptance\", app_name=\"apisix\", log_type=\"audit\"}[");
+                .startsWith("sum(count_over_time({namespace=\"acceptance\", app_name=\"apisix\", log_type=\"messages\"}[");
     }
 
     @Test
@@ -736,7 +740,7 @@ class LogsServiceTest {
 
         pinnedTo("acceptance", "namespace").getRecentLogs(null, null, null, null, null, null);
 
-        verify(lokiClient).queryRange(eq("{namespace=\"acceptance\", app_name=\"apisix\", log_type=\"audit\"}"),
+        verify(lokiClient).queryRange(eq("{namespace=\"acceptance\", app_name=\"apisix\", log_type=\"messages\"}"),
                 anyLong(), anyLong(), anyInt(), anyString());
     }
 
@@ -746,7 +750,7 @@ class LogsServiceTest {
 
         logsService.getRecentLogs(null, null, "timeout", null, null, null);
 
-        verify(lokiClient).queryRange(eq(AUDIT + " |~ \"(?i)timeout\""),
+        verify(lokiClient).queryRange(eq(MESSAGES + " |~ \"(?i)timeout\""),
                 anyLong(), anyLong(), anyInt(), anyString());
     }
 
@@ -818,7 +822,7 @@ class LogsServiceTest {
         when(lokiClient.instantQuery(anyString(), any())).thenReturn(vector("3"));
 
         assertThat(pinnedTo("gem-a,gem-b", "namespace").countLogs(null, null, null, null, null).query())
-                .startsWith("sum(count_over_time({namespace=~\"gem-a|gem-b\", app_name=\"apisix\", log_type=\"audit\"}[");
+                .startsWith("sum(count_over_time({namespace=~\"gem-a|gem-b\", app_name=\"apisix\", log_type=\"messages\"}[");
     }
 
     /** The endpoint the dashboard actually calls, which had no namespace assertion at all. */
@@ -829,7 +833,7 @@ class LogsServiceTest {
 
         pinnedTo("gem-a,gem-b", "namespace").getPage(null, null, null, null, null, null, 1, 25, null, null);
 
-        verify(lokiClient).queryRange(eq("{namespace=~\"gem-a|gem-b\", app_name=\"apisix\", log_type=\"audit\"}"),
+        verify(lokiClient).queryRange(eq("{namespace=~\"gem-a|gem-b\", app_name=\"apisix\", log_type=\"messages\"}"),
                 anyLong(), anyLong(), anyInt(), anyString());
     }
 
@@ -915,7 +919,7 @@ class LogsServiceTest {
         ArgumentCaptor<String> logql = ArgumentCaptor.forClass(String.class);
         verify(lokiClient).instantQuery(logql.capture(), any());
         // default window is the last hour, so the range must say 3600s
-        assertThat(logql.getValue()).isEqualTo("sum(count_over_time(" + AUDIT + "[3600s]))");
+        assertThat(logql.getValue()).isEqualTo("sum(count_over_time(" + MESSAGES + "[3600s]))");
     }
 
     @Test
@@ -927,7 +931,7 @@ class LogsServiceTest {
         ArgumentCaptor<String> logql = ArgumentCaptor.forClass(String.class);
         verify(lokiClient).instantQuery(logql.capture(), any());
         assertThat(logql.getValue())
-                .isEqualTo("sum(count_over_time(" + AUDIT + " |~ \"(?i)timeout\"[3600s]))");
+                .isEqualTo("sum(count_over_time(" + MESSAGES + " |~ \"(?i)timeout\"[3600s]))");
     }
 
     @Test
@@ -1042,8 +1046,8 @@ class LogsServiceTest {
 
         // Both spans are one window wide...
         assertThat(logql.getAllValues())
-                .containsExactly("sum(count_over_time(" + AUDIT + "[" + WEEK + "s]))",
-                        "sum(count_over_time(" + AUDIT + "[" + WEEK + "s]))");
+                .containsExactly("sum(count_over_time(" + MESSAGES + "[" + WEEK + "s]))",
+                        "sum(count_over_time(" + MESSAGES + "[" + WEEK + "s]))");
         // ...the current one evaluated at now, the previous one exactly a window earlier,
         // so together they cover (now-2w, now] with no overlap and no gap.
         assertThat(evalNanos.getAllValues().get(0)).isNull();
@@ -1061,7 +1065,7 @@ class LogsServiceTest {
         ArgumentCaptor<String> logql = ArgumentCaptor.forClass(String.class);
         verify(lokiClient, times(2)).instantQuery(logql.capture(), any());
         assertThat(logql.getAllValues())
-                .allMatch(q -> q.equals("sum(count_over_time(" + AUDIT + "[3600s]))"));
+                .allMatch(q -> q.equals("sum(count_over_time(" + MESSAGES + "[3600s]))"));
     }
 
     @Test
@@ -1088,7 +1092,7 @@ class LogsServiceTest {
     void messageVolume_rejectsAnUnknownStream() {
         assertThatThrownBy(() -> logsService.messageVolume("nonsense", null, null, null))
                 .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("audit, error");
+                .hasMessageContaining("messages, error");
     }
 
     /** Zero has no previous window to sit beside, so it is a mistake rather than "all". */
@@ -1173,7 +1177,7 @@ class LogsServiceTest {
 
         logsService.getRecentLogs(null, null, "timeout", null, "1787661302684000000", null);
 
-        verify(lokiClient).queryRange(eq(AUDIT + " |~ \"(?i)timeout\""),
+        verify(lokiClient).queryRange(eq(MESSAGES + " |~ \"(?i)timeout\""),
                 anyLong(), eq(1787661302684000000L), anyInt(), anyString());
     }
 
@@ -1323,7 +1327,7 @@ class LogsServiceTest {
 
         logsService.getPage(null, null, "timeout", null, null, null, 1, 25, null, null);
 
-        verify(lokiClient).queryRange(eq(AUDIT + " |~ \"(?i)timeout\""),
+        verify(lokiClient).queryRange(eq(MESSAGES + " |~ \"(?i)timeout\""),
                 anyLong(), anyLong(), anyInt(), anyString());
     }
 
@@ -1589,7 +1593,7 @@ class LogsServiceTest {
 
         logsService.getPage(null, null, "centric", "path", null, null, 1, 25, null, null);
 
-        verify(lokiClient).queryRange(eq(AUDIT + " |~ \"(?i)centric\""),
+        verify(lokiClient).queryRange(eq(MESSAGES + " |~ \"(?i)centric\""),
                 anyLong(), anyLong(), anyInt(), anyString());
     }
 
@@ -1605,7 +1609,7 @@ class LogsServiceTest {
 
         LogPageDto page = logsService.getPage(null, null, "45", "latencyMs", null, null, 1, 25, null, null);
 
-        verify(lokiClient).queryRange(eq(AUDIT), anyLong(), anyLong(), anyInt(), anyString());
+        verify(lokiClient).queryRange(eq(MESSAGES), anyLong(), anyLong(), anyInt(), anyString());
         assertThat(page.entries()).extracting(LogEntryDto::routeName).containsExactly("a");
     }
 
@@ -1618,7 +1622,7 @@ class LogsServiceTest {
 
         LogPageDto page = logsService.getPage(null, null, "gem-b", "namespace", null, null, 1, 25, null, null);
 
-        verify(lokiClient).queryRange(eq(AUDIT), anyLong(), anyLong(), anyInt(), anyString());
+        verify(lokiClient).queryRange(eq(MESSAGES), anyLong(), anyLong(), anyInt(), anyString());
         assertThat(page.entries()).extracting(LogEntryDto::routeName).containsExactly("b");
     }
 
@@ -1706,6 +1710,53 @@ class LogsServiceTest {
     void describeFields_rejectsAnUnknownType() {
         assertThatThrownBy(() -> logsService.describeFields("acces"))
                 .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("type must be one of audit, error");
+                .hasMessageContaining("type must be one or more of audit, messages, error");
+    }
+
+    @Test
+    void describeFields_opensTheUnionOfTheColumnsWhenTwoKindsAreMerged() {
+        Map<String, Boolean> merged = logsService.describeFields("messages,error").stream()
+                .collect(Collectors.toMap(LogFieldDto::id, LogFieldDto::defaultVisible));
+
+        // Status is the audit table's, Message the error table's; the merged one opens both.
+        assertThat(merged.get("status")).isTrue();
+        assertThat(merged.get("message")).isTrue();
+    }
+
+    @Test
+    void resolveKinds_readsSeveralNamesAndStillRejectsABadOne() {
+        assertThat(logsService.buildPipeline(LogKind.fromParams("messages,error"), null, null))
+                .isEqualTo("{app_name=\"apisix\", log_type=~\"messages|error\"}");
+        // Order and repeats do not make a different query.
+        assertThat(logsService.buildPipeline(LogKind.fromParams("error,messages,error"), null, null))
+                .isEqualTo("{app_name=\"apisix\", log_type=~\"messages|error\"}");
+        // Both access labels, for a Loki holding lines from before the rename.
+        assertThat(logsService.buildPipeline(LogKind.fromParams("audit,messages"), null, null))
+                .isEqualTo("{app_name=\"apisix\", log_type=~\"audit|messages\"}");
+
+        assertThatThrownBy(() -> logsService.describeFields("messages,warnings"))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("400");
+    }
+
+    /** The old label is still its own kind, selectable on its own. */
+    @Test
+    void resolveKinds_stillSelectsTheAuditLabel() {
+        assertThat(logsService.buildPipeline(LogKind.fromParams("audit"), null, null))
+                .isEqualTo(AUDIT);
+    }
+
+    /**
+     * Both access labels flatten the same way. Only the reported type differs, and it comes
+     * off the stream's log_type label rather than off the line.
+     */
+    @Test
+    void getRecentLogs_takesTheTypeFromTheStreamsOwnLabel() {
+        lokiReturns(streams(labelledStream(
+                "{\"app_name\":\"apisix\",\"log_type\":\"audit\"}", TS, ACCESS_LINE)));
+
+        LogEntryDto entry = logsService.getRecentLogs("audit", null, null, null, null, null).getFirst();
+        assertThat(entry.type()).isEqualTo("audit");
+        assertThat(entry.routeName()).isEqualTo("centric");
     }
 }

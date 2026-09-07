@@ -51,8 +51,8 @@ class RouteStatsServiceTest {
     private static final long ANCHOR_SEC = 1_699_920_000L;
     private static final String ANCHOR = String.valueOf(ANCHOR_SEC * 1_000_000_000L);
 
-    /** A window of 60s lands on 15s buckets - four of them, small enough to assert on whole. */
-    private static final long TINY_WINDOW = 60L;
+    /** A window of 20s lands on 5s buckets - four of them, small enough to assert on whole. */
+    private static final long TINY_WINDOW = 20L;
 
     private static final String EMPTY_MATRIX = matrix();
     private static final String EMPTY_VECTOR = vector();
@@ -192,8 +192,29 @@ class RouteStatsServiceTest {
 
         RouteStatsResultDto result = pinnedTo("acceptance").routeStats(3600L, ANCHOR, null);
 
-        assertThat(result.countQuery()).contains("{namespace=\"acceptance\", app_name=\"apisix\", log_type=\"audit\"}");
-        assertThat(result.latencyQuery()).contains("{namespace=\"acceptance\", app_name=\"apisix\", log_type=\"audit\"}");
+        assertThat(result.countQuery()).contains("{namespace=\"acceptance\", app_name=\"apisix\", log_type=\"messages\"}");
+        assertThat(result.latencyQuery()).contains("{namespace=\"acceptance\", app_name=\"apisix\", log_type=\"messages\"}");
+    }
+
+    /** The table has to follow the log below it onto another stream. */
+    @Test
+    void type_picksWhichStreamIsCounted() {
+        lokiReturns(EMPTY_MATRIX, EMPTY_VECTOR);
+        controlApiReturns("[]");
+
+        RouteStatsResultDto audit = service.routeStats(3600L, ANCHOR, null, "audit");
+        assertThat(audit.countQuery()).contains("{app_name=\"apisix\", log_type=\"audit\"}");
+
+        RouteStatsResultDto merged = service.routeStats(3600L, ANCHOR, null, "audit,messages");
+        assertThat(merged.countQuery()).contains("{app_name=\"apisix\", log_type=~\"audit|messages\"}");
+    }
+
+    /** A typo is a 400, not a silent count of the wrong stream. */
+    @Test
+    void type_rejectsAnUnknownStream() {
+        assertThatThrownBy(() -> service.routeStats(3600L, ANCHOR, null, "acces"))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("audit, messages, error");
     }
 
     @Test
@@ -211,7 +232,7 @@ class RouteStatsServiceTest {
     /** Round bucket widths, and enough of them to see an hour-long outage inside a week. */
     @Test
     void step_isTheFinestThatKeepsTheBucketCountReasonable() {
-        assertThat(service.resolveStep(60)).isEqualTo(15);
+        assertThat(service.resolveStep(60)).isEqualTo(5);
         assertThat(service.resolveStep(3600)).isEqualTo(30);
         assertThat(service.resolveStep(86400)).isEqualTo(600);
         // A week on hourly buckets, which is also the span people describe outages in.
@@ -226,10 +247,10 @@ class RouteStatsServiceTest {
 
         RouteStatsResultDto result = service.routeStats(TINY_WINDOW, ANCHOR, null);
 
-        assertThat(result.stepSeconds()).isEqualTo(15);
-        assertThat(result.windowSeconds()).isEqualTo(60);
+        assertThat(result.stepSeconds()).isEqualTo(5);
+        assertThat(result.windowSeconds()).isEqualTo(20);
         assertThat(result.bucketTimes()).containsExactly(
-                ANCHOR_SEC - 45, ANCHOR_SEC - 30, ANCHOR_SEC - 15, ANCHOR_SEC);
+                ANCHOR_SEC - 15, ANCHOR_SEC - 10, ANCHOR_SEC - 5, ANCHOR_SEC);
     }
 
     /**
@@ -241,11 +262,11 @@ class RouteStatsServiceTest {
         lokiReturns(EMPTY_MATRIX, EMPTY_VECTOR);
         controlApiReturns("[]");
 
-        RouteStatsResultDto result = service.routeStats(50L, ANCHOR, null);
+        RouteStatsResultDto result = service.routeStats(18L, ANCHOR, null);
 
-        assertThat(result.stepSeconds()).isEqualTo(15);
+        assertThat(result.stepSeconds()).isEqualTo(5);
         assertThat(result.bucketTimes()).hasSize(4);
-        assertThat(result.windowSeconds()).isEqualTo(60);
+        assertThat(result.windowSeconds()).isEqualTo(20);
     }
 
     /**
@@ -259,13 +280,13 @@ class RouteStatsServiceTest {
         lokiReturns(EMPTY_MATRIX, EMPTY_VECTOR);
         controlApiReturns("[]");
 
-        // Seven seconds past a 15s boundary, which is where the grid must land.
-        long unaligned = ANCHOR_SEC + 7;
+        // Three seconds past a 5s boundary, which is where the grid must land.
+        long unaligned = ANCHOR_SEC + 3;
         RouteStatsResultDto result = service.routeStats(
                 TINY_WINDOW, String.valueOf(unaligned * 1_000_000_000L), null);
 
         assertThat(result.bucketTimes()).containsExactly(
-                ANCHOR_SEC - 45, ANCHOR_SEC - 30, ANCHOR_SEC - 15, ANCHOR_SEC);
+                ANCHOR_SEC - 15, ANCHOR_SEC - 10, ANCHOR_SEC - 5, ANCHOR_SEC);
     }
 
     /** Snapping never rounds forward - a bucket still in progress is not drawn as a whole one. */
@@ -275,7 +296,7 @@ class RouteStatsServiceTest {
         controlApiReturns("[]");
 
         RouteStatsResultDto result = service.routeStats(
-                TINY_WINDOW, String.valueOf((ANCHOR_SEC + 14) * 1_000_000_000L), null);
+                TINY_WINDOW, String.valueOf((ANCHOR_SEC + 4) * 1_000_000_000L), null);
 
         assertThat(result.bucketTimes().getLast()).isEqualTo(ANCHOR_SEC);
     }
@@ -290,8 +311,8 @@ class RouteStatsServiceTest {
 
         ArgumentCaptor<Long> start = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<Long> end = ArgumentCaptor.forClass(Long.class);
-        verify(lokiClient).metricRangeQuery(anyString(), start.capture(), end.capture(), eq(15L));
-        assertThat(start.getValue()).isEqualTo((ANCHOR_SEC - 45) * 1_000_000_000L);
+        verify(lokiClient).metricRangeQuery(anyString(), start.capture(), end.capture(), eq(5L));
+        assertThat(start.getValue()).isEqualTo((ANCHOR_SEC - 15) * 1_000_000_000L);
         assertThat(end.getValue()).isEqualTo(ANCHOR_SEC * 1_000_000_000L);
     }
 
@@ -305,7 +326,7 @@ class RouteStatsServiceTest {
     @Test
     void series_areZeroFilledOntoTheWholeGrid() {
         lokiReturns(matrix(seriesAt(labels("centric", "centric", "200"),
-                ANCHOR_SEC - 45, 7, ANCHOR_SEC, 3)), EMPTY_VECTOR);
+                ANCHOR_SEC - 15, 7, ANCHOR_SEC, 3)), EMPTY_VECTOR);
         controlApiReturns("[]");
 
         RouteStatsResultDto result = service.routeStats(TINY_WINDOW, ANCHOR, null);
@@ -317,7 +338,7 @@ class RouteStatsServiceTest {
     @Test
     void theTotalIsTheSumOfTheBuckets() {
         lokiReturns(matrix(seriesAt(labels("centric", "centric", "200"),
-                ANCHOR_SEC - 45, 7, ANCHOR_SEC - 15, 5, ANCHOR_SEC, 3)), EMPTY_VECTOR);
+                ANCHOR_SEC - 15, 7, ANCHOR_SEC - 5, 5, ANCHOR_SEC, 3)), EMPTY_VECTOR);
         controlApiReturns("[]");
 
         RouteStatsResultDto result = service.routeStats(TINY_WINDOW, ANCHOR, null);
@@ -330,7 +351,7 @@ class RouteStatsServiceTest {
     @Test
     void series_snapAPointToItsNearestBucket() {
         lokiReturns(matrix("{\"metric\":" + labels("centric", "centric", "200")
-                + ",\"values\":[[" + (ANCHOR_SEC - 30.4) + ",\"9\"]]}"), EMPTY_VECTOR);
+                + ",\"values\":[[" + (ANCHOR_SEC - 10.4) + ",\"9\"]]}"), EMPTY_VECTOR);
         controlApiReturns("[]");
 
         RouteStatsResultDto result = service.routeStats(TINY_WINDOW, ANCHOR, null);
@@ -609,7 +630,7 @@ class RouteStatsServiceTest {
     void cacheTtl_isHalfABucket_flooredAndCapped() {
         long now = 1_700_000_000_000L;
 
-        // 15s buckets. Half of that is below the floor, and a window this cheap is better
+        // 5s buckets. Half of that is below the floor, and a window this cheap is better
         // answered fresh than remembered.
         assertThat(service.cacheTtlMillis(300, null, now)).isEqualTo(10_000);
         // 6 hours buckets at 120s.

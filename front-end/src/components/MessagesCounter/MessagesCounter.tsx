@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
 import { useFetch } from '../../hooks/useFetch';
+import { kindParam } from '../LokiLogTable/logKinds';
+import type { LogKinds } from '../LokiLogTable/types';
 import { VolumeRow } from './VolumeRow';
 import {
     countEndpoint,
@@ -15,6 +17,8 @@ interface MessagesCounterProps {
     title: string;
     /** Case-insensitive line filter narrowing which traffic counts. Empty counts every line. */
     search?: string;
+    /** Which streams count as messages - same spelling as the other panels'. */
+    kind?: LogKinds;
     refreshKey: number;
 }
 
@@ -26,14 +30,19 @@ interface MessagesCounterProps {
  * or it does not. The trade is retention: the headline is "everything Loki still holds", not
  * an all-time total.
  */
-export const MessagesCounter = ({ title, search = '', refreshKey }: MessagesCounterProps) => {
+export const MessagesCounter = ({ title, search = '', kind = 'messages', refreshKey }: MessagesCounterProps) => {
+    const type = kindParam(kind);
+
     // startTime=0 is "the whole retention window" - LogsService resolves it, since Loki has no
     // endpoint that reports its own retention.
-    const totalEndpoint = useMemo(() => countEndpoint('/logs/count', { startTime: '0' }, search), [search]);
-    const weekEndpoint = useMemo(() => countEndpoint('/logs/volume', {}, search), [search]);
+    const totalEndpoint = useMemo(
+        () => countEndpoint('/logs/count', { type, startTime: '0' }, search),
+        [search, type],
+    );
+    const weekEndpoint = useMemo(() => countEndpoint('/logs/volume', { type }, search), [search, type]);
     const hourEndpoint = useMemo(
-        () => countEndpoint('/logs/volume', { windowSeconds: String(HOUR_SECONDS) }, search),
-        [search],
+        () => countEndpoint('/logs/volume', { type, windowSeconds: String(HOUR_SECONDS) }, search),
+        [search, type],
     );
 
     const totalFetch = useFetch<LogCount>(totalEndpoint, refreshKey);

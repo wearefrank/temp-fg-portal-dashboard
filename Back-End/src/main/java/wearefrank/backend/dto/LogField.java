@@ -45,7 +45,7 @@ public record LogField(
      * separately would only be a second thing to keep in step with the first.
      */
     public boolean fills(LogKind kind) {
-        return kind == LogKind.AUDIT ? !auditPaths.isEmpty() : errorSource != null;
+        return kind.isAccessRecord() ? !auditPaths.isEmpty() : errorSource != null;
     }
 
     /** Whether this field draws a column at all - see {@link #label()}. */

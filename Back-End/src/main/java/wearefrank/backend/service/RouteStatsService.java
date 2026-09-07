@@ -17,6 +17,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
@@ -79,6 +80,11 @@ public class RouteStatsService {
 
     private record Cached(RouteStatsResultDto result, long expiresAtMillis) {}
 
+    /** The default stream, for tests - the controller always names one. */
+    public RouteStatsResultDto routeStats(Long windowSeconds, String anchor, String search) {
+        return routeStats(windowSeconds, anchor, search, null);
+    }
+
     /**
      * The table.
      *
@@ -86,21 +92,26 @@ public class RouteStatsService {
      *                      window - the same spelling {@code /logs/page} takes.
      * @param anchor        nanosecond instant the window ends at, or null for now.
      * @param search        case-insensitive line filter.
+     * @param type          which stream to aggregate, or several comma-separated - the same
+     *                      spelling {@code /logs/page} takes. Null is the default kind.
      */
-    public RouteStatsResultDto routeStats(Long windowSeconds, String anchor, String search) {
+    public RouteStatsResultDto routeStats(Long windowSeconds, String anchor, String search, String type) {
         long window = resolveWindow(windowSeconds);
         Long anchorNanos = parseAnchor(anchor);
+        Set<LogKind> kinds = scope.resolveKinds(type);
 
         // A relative window keys without its "now", so two requests seconds apart share an
-        // answer. An absolute one carries its anchor and keys separately.
-        String key = window + "|" + (anchorNanos == null ? "" : anchorNanos) + "|" + (search == null ? "" : search);
+        // answer. An absolute one carries its anchor and keys separately. The kinds are in
+        // the key too, or switching stream would be served the previous stream's numbers.
+        String key = window + "|" + (anchorNanos == null ? "" : anchorNanos)
+                + "|" + (search == null ? "" : search) + "|" + kinds;
         long nowMillis = System.currentTimeMillis();
         Cached hit = cache.get(key);
         if (hit != null && hit.expiresAtMillis() > nowMillis) {
             return hit.result();
         }
 
-        RouteStatsResultDto result = build(window, anchorNanos, search);
+        RouteStatsResultDto result = build(window, anchorNanos, search, kinds);
         evictIfFull(nowMillis);
         cache.put(key, new Cached(result, nowMillis + cacheTtlMillis(window, anchorNanos, nowMillis)));
         return result;
@@ -131,7 +142,7 @@ public class RouteStatsService {
         }
     }
 
-    private RouteStatsResultDto build(long window, Long anchorNanos, String search) {
+    private RouteStatsResultDto build(long window, Long anchorNanos, String search, Set<LogKind> kinds) {
         long step = resolveStep(window);
         // Rounded up to whole buckets: a part-bucket is drawn full-width and reads as a drop
         // in traffic that never happened.
@@ -150,7 +161,7 @@ public class RouteStatsService {
             bucketTimes.add(firstBucket + (long) i * step);
         }
 
-        String pipeline = scope.pipeline(LogKind.AUDIT, null, search);
+        String pipeline = scope.pipeline(kinds, null, search);
         String countQuery = countQuery(pipeline, step);
         String latencyQuery = latencyQuery(pipeline, covered);
 

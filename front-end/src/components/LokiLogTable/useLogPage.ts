@@ -9,7 +9,7 @@ import {
     saveRange,
     type TimeRange,
 } from '../TimeRangePicker/timeRange';
-import type { LogKind, LogPage } from './types';
+import type { LogPage } from './types';
 import {usePersistedState} from "../../hooks/usePersistedState.ts";
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -18,7 +18,8 @@ const SEARCH_DEBOUNCE_MS = 300;
 export const ALL_COLUMNS = '';
 
 interface UseLogPageOptions {
-    kind: LogKind;
+    /** The normalised ?type= - see kindParam. */
+    kind: string;
     query?: string;
     defaultPageSize: number;
     defaultRange?: TimeRange;

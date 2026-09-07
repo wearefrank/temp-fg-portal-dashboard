@@ -16,15 +16,19 @@ import { MatchCount } from './MatchCount';
 import { LogTable } from './LogTable';
 import { LogPager } from './LogPager';
 import { NewLinesBadge } from './NewLinesBadge';
-import type { LogKind } from './types';
+import { normalizeKinds } from './logKinds';
+import type { LogKinds } from './types';
 import styles from './LokiLogTable.module.css';
 
-export type { LogEntry, LogKind, LogPage } from './types';
+export type { LogEntry, LogKind, LogKinds, LogPage } from './types';
 
 interface LokiLogTableProps {
     title: string;
-    /** Which of the gateway's two streams to read: it picks the selector and the columns. */
-    kind: LogKind;
+    /**
+     * Which streams to read - picks the selector and the columns. An array merges them into
+     * one table, e.g. kind={['messages', 'error']}.
+     */
+    kind: LogKinds;
     /** A LogQL selector overriding the one `kind` would pick. */
     query?: string;
     defaultPageSize?: number;
@@ -48,8 +52,13 @@ const LokiLogTablePanel = ({
     range: rangeProp,
     refreshKey,
 }: LokiLogTableProps) => {
+    // Normalised once. The fetches key on the string, so it stays stable across renders even
+    // when the prop is an inline array.
+    const kinds = normalizeKinds(kind);
+    const type = kinds.join(',');
+
     const log = useLogPage({
-        kind,
+        kind: type,
         query,
         defaultPageSize,
         defaultRange,
@@ -59,7 +68,7 @@ const LokiLogTablePanel = ({
     });
     const namespaces = useNamespaceFilter(log.entries);
     const { fields, fieldsError, columns, columnVisibility, setColumnVisibility } =
-        useLogColumns(kind, log.entries, log.range);
+        useLogColumns(type, log.entries, log.range);
 
     const table = useTable({
         features: logTableFeatures,
@@ -124,7 +133,7 @@ const LokiLogTablePanel = ({
     const searchedColumn = searchColumns.find(column => column.id === log.searchField);
 
     const subtitle = logSubtitle({
-        kind,
+        kinds,
         range: log.range,
         search: log.search,
         searchColumn: searchedColumn?.label ?? '',
@@ -210,7 +219,7 @@ const LokiLogTablePanel = ({
                     sortedByTime={log.sortId === 'timestamp'}
                     badge={showNewLines && (
                         <NewLinesBadge
-                            kind={kind}
+                            kind={type}
                             query={query}
                             search={log.search}
                             searchField={log.searchField}
