@@ -2,27 +2,6 @@ import {useCallback, useState} from 'react';
 
 export const PERSIST_PREFIX = 'persisted_storage:';
 
-function resolve<T>(initial: T | (() => T)): T {
-    if (typeof initial === 'function') {
-        return (initial as () => T)();
-    }
-    return initial;
-}
-
-export function readPersisted<T>(key: string, initialState: T | (() => T)): T {
-    try {
-        const storedValue = localStorage.getItem(PERSIST_PREFIX + key);
-
-        if (storedValue === null) {
-            return resolve(initialState);
-        }
-
-        return JSON.parse(storedValue) as T;
-    } catch {
-        return resolve(initialState);
-    }
-}
-
 export function usePersistedState<T>(
     key: string,
     initialState: T | (() => T),
@@ -39,4 +18,25 @@ export function usePersistedState<T>(
     }, [key]);
 
     return [value, setPersisted];
+}
+
+export function readPersisted<T>(key: string, initialState: T | (() => T)): T {
+    try {
+        const storedValue = localStorage.getItem(PERSIST_PREFIX + key);
+
+        if (storedValue === null) {
+            return resolve(initialState);
+        }
+
+        return JSON.parse(storedValue) as T;
+    } catch {
+        return resolve(initialState);
+    }
+}
+
+function resolve<T>(initial: T | (() => T)): T {
+    if (typeof initial === 'function') {
+        return (initial as () => T)();
+    }
+    return initial;
 }

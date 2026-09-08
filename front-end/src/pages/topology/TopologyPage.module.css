@@ -157,6 +157,10 @@
 .nodeHeader {
     padding: 4px 10px;
     border-radius: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
 }
 
 .nodeCategory {
@@ -165,6 +169,44 @@
     font-size: 0.65rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+}
+
+/* Consumers some resource blacklists */
+
+.deniedNode {
+    border: 1px dashed var(--error-color);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--error-color) 22%, transparent);
+}
+
+/* The header is always a saturated category colour, so this pill stays white in both themes. */
+.deniedBadge {
+    padding: 0 5px;
+    border-radius: 8px;
+    background: #fff;
+    color: #c62828;
+    font-weight: 700;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+
+.deniedList {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 3px;
+    margin-top: 2px;
+}
+
+.deniedChip {
+    padding: 1px 6px;
+    border-radius: 10px;
+    border: 1px solid var(--error-color);
+    background: color-mix(in srgb, var(--error-color) 12%, transparent);
+    color: var(--error-color);
+    font-size: 0.65rem;
+    white-space: nowrap;
 }
 
 .nodeBody {
@@ -447,6 +489,24 @@
 .cardMeta {
     font-size: 0.65rem;
     color: var(--text-secondary);
+}
+
+.cardNotice {
+    display: flex;
+    align-items: flex-start;
+    gap: 5px;
+    font-size: 0.65rem;
+    line-height: 1.4;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border-left: 2px solid var(--warning-color, #d97706);
+    border-radius: 3px;
+    padding: 5px 8px;
+}
+
+.cardNoticeIcon {
+    color: var(--warning-color, #d97706);
+    flex-shrink: 0;
 }
 
 .cardYaml {

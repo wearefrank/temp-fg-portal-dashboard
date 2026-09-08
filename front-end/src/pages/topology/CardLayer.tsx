@@ -22,9 +22,16 @@ type CardLayerProps = {
     closeCard: (id: string) => void;
     onHeaderMouseDown: (e: React.MouseEvent, id: string) => void;
     onResizeMouseDown: (e: React.MouseEvent, id: string) => void;
+    /** Off for the live view, where nodes have no matching entry in the edited config. */
+    showEditorLinks?: boolean;
+    /** Short warning shown above the YAML, e.g. that this isn't the config file. */
+    notice?: string;
 };
 
-export const CardLayer: React.FC<CardLayerProps> = ({cards, edges, closeCard, onHeaderMouseDown, onResizeMouseDown}) => {
+export function CardLayer({
+    cards, edges, closeCard, onHeaderMouseDown, onResizeMouseDown,
+    showEditorLinks = true, notice,
+}: CardLayerProps) {
     const {x: vpX, y: vpY, zoom} = useViewport();
 
     return (
@@ -59,15 +66,18 @@ export const CardLayer: React.FC<CardLayerProps> = ({cards, edges, closeCard, on
                             {edgeCount > 0 && (
                                 <div className={styles.cardMeta}>{edgeCount} connection{edgeCount !== 1 ? 's' : ''}</div>
                             )}
+                            {notice && <CardNotice text={notice}/>}
                             <pre className={styles.cardYaml}>{yamlText}</pre>
                         </div>
-                        <div className={styles.cardActions}>
-                            <div className={styles.cardActionsLabel}>Open in</div>
-                            <div className={styles.cardActionsBtns}>
-                                <Link to={configFocusHref} className={styles.cardActionBtn}>YAML Editor</Link>
-                                <Link to={`/designer?category=${card.data.category}&focusId=${focusId}`} className={styles.cardActionBtn}>Config Designer</Link>
+                        {showEditorLinks && (
+                            <div className={styles.cardActions}>
+                                <div className={styles.cardActionsLabel}>Open in</div>
+                                <div className={styles.cardActionsBtns}>
+                                    <Link to={configFocusHref} className={styles.cardActionBtn}>YAML Editor</Link>
+                                    <Link to={`/designer?category=${card.data.category}&focusId=${focusId}`} className={styles.cardActionBtn}>Config Designer</Link>
+                                </div>
                             </div>
-                        </div>
+                        )}
                         <div className={styles.cardResizeFooter} onMouseDown={e => onResizeMouseDown(e, card.id)}>
                             <svg width="10" height="10" viewBox="0 0 10 10" className={styles.cardResizeIcon}>
                                 <line x1="3" y1="10" x2="10" y2="3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
@@ -79,4 +89,14 @@ export const CardLayer: React.FC<CardLayerProps> = ({cards, edges, closeCard, on
             })}
         </div>
     );
-};
+}
+
+/** Small warning line inside a detail card. */
+function CardNotice({text}: {text: string}) {
+    return (
+        <div className={styles.cardNotice} role="note">
+            <span className={styles.cardNoticeIcon} aria-hidden="true">⚠</span>
+            <span>{text}</span>
+        </div>
+    );
+}

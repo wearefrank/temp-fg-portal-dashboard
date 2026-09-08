@@ -3,6 +3,7 @@ import {Handle, Position, useEdges, useNodeId} from '@xyflow/react';
 import type {NodeProps, Node} from '@xyflow/react';
 import type {ColorScheme, ConfigNodeData} from './buildTopology';
 import { CATEGORY_COLOR, CATEGORY_LABEL, CATEGORY_DEFINITIONS, getDisplayId } from '../../config/categoryDefinitions';
+import { DENIED_ON } from './buildLiveTopology';
 import styles from './TopologyPage.module.css';
 
 // Re-export so existing importers (TopologyPage, CardLayer) don't need to change
@@ -220,6 +221,17 @@ function upstreamAddresses(nodes: unknown): string[] {
     return [];
 }
 
+// Resources that blacklist this consumer, empty for every other kind of node.
+function deniedOn(entry: Record<string, unknown>): string[] {
+    const value = entry[DENIED_ON];
+    return Array.isArray(value) ? value.map(String) : [];
+}
+
+// 'route-r1' reads better as 'route r1' on a chip.
+function readableNodeId(nodeId: string): string {
+    return nodeId.replace('-', ' ');
+}
+
 const CATEGORIES_WITH_INPUTS = new Set(
     Object.entries(CATEGORY_DEFINITIONS).flatMap(([cat, def]) => [
         ...def.referenceFields.filter(r => r.edgeDirection === 'forward').map(r => r.targetCategory),
@@ -279,14 +291,16 @@ export const ConfigNode: React.FC<NodeProps<ConfigNodeType>> = ({data}) => {
     const pluginKeys = plugins && typeof plugins === 'object' && !Array.isArray(plugins)
         ? Object.keys(plugins as Record<string, unknown>)
         : [];
+    const denied = deniedOn(entry as Record<string, unknown>);
 
     return (
-        <div className={styles.configNode}>
+        <div className={denied.length > 0 ? `${styles.configNode} ${styles.deniedNode}` : styles.configNode}>
             {getHandles(category, entry as Record<string, unknown>, colorScheme, handleCounts, handleTooltips)}
 
             <div className={styles.nodeMain}>
                 <div className={styles.nodeHeader} style={{background: color}}>
                     <span className={styles.nodeCategory}>{label}</span>
+                    {denied.length > 0 && <span className={styles.deniedBadge}>blocked</span>}
                 </div>
 
                 <div className={styles.nodeBody}>
@@ -313,6 +327,15 @@ export const ConfigNode: React.FC<NodeProps<ConfigNodeType>> = ({data}) => {
                                     <div key={addr}><code>{addr}</code></div>
                                 ))}
                                 {!!entry['type'] && <div className={styles.nodeTag}>{String(entry['type'])}</div>}
+                            </div>
+                        )}
+
+                        {denied.length > 0 && (
+                            <div className={styles.deniedList}>
+                                <span className={styles.nodeDetailLabel}>blacklisted on</span>
+                                {denied.map(id => (
+                                    <span key={id} className={styles.deniedChip}>{readableNodeId(id)}</span>
+                                ))}
                             </div>
                         )}
 

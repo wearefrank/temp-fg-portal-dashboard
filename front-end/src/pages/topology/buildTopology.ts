@@ -48,8 +48,9 @@ const DEST_CONSUMER_EDGE_COLORS: Record<string, string> = {
     plugin_config: '#f59e0b',
 };
 
-const EDGE_LABEL_STYLE = { fontSize: '9px', fill: '#cbd5e1' };
-const EDGE_LABEL_BG_STYLE = { fill: '#1e293b', fillOpacity: 0.9, rx: 3, ry: 3 };
+// Shared with buildLiveTopology so both graphs label edges the same way.
+export const EDGE_LABEL_STYLE = { fontSize: '9px', fill: '#cbd5e1' };
+export const EDGE_LABEL_BG_STYLE = { fill: '#1e293b', fillOpacity: 0.9, rx: 3, ry: 3 };
 
 function nodeId(category: string, entry: ResourceConfiguration, index?: number): string {
     return `${category}-${getDisplayId(category, entry as Record<string, unknown>, index)}`;

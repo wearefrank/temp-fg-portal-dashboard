@@ -75,9 +75,9 @@ export const Header = () => {
           <NavLink to="/dashboard" className={({ isActive }) => (isActive ? 'active' : undefined)}>
             Dashboard
           </NavLink>
-          {/*<NavLink to="/yamlEditor" className={({ isActive }) => (isActive ? 'active' : undefined)}>*/}
-          {/*  YAML Editor*/}
-          {/*</NavLink>*/}
+          <NavLink to="/yamlEditor" className={({ isActive }) => (isActive ? 'active' : undefined)}>
+            YAML Editor
+          </NavLink>
           {/*<NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : undefined)}>*/}
           {/*  History*/}
           {/*</NavLink>*/}
@@ -87,9 +87,12 @@ export const Header = () => {
           {/*<NavLink to="/designer" className={({ isActive }) => (isActive ? 'active' : undefined)}>*/}
           {/*  Config Designer*/}
           {/*</NavLink>*/}
-          {/*<NavLink to="/topology" className={({ isActive }) => (isActive ? 'active' : undefined)}>*/}
-          {/*  Topology*/}
-          {/*</NavLink>*/}
+          <NavLink to="/topology" className={({ isActive }) => (isActive ? 'active' : undefined)}>
+            Topology
+          </NavLink>
+          <NavLink to="/topology/live" className={({ isActive }) => (isActive ? 'active' : undefined)}>
+            Live Topology
+          </NavLink>
         </nav>
 
         <div className={styles.headerActions}>

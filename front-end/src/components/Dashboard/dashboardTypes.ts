@@ -16,15 +16,36 @@ export interface LiveNode {
 /** APISIX accepts both an array of nodes and a {"host:port": weight} map. */
 export type LiveNodes = LiveNode[] | Record<string, number>;
 
-/** The records below mirror what the APISIX control API returns, key plus value. */
+/** An upstream a route or service declares in place, instead of pointing at one by id. */
+export interface LiveInlineUpstream {
+    id?: string | number;
+    name?: string;
+    type?: string;
+    scheme?: string;
+    nodes?: LiveNodes;
+    [key: string]: unknown;
+}
+
+/**
+ * The records below mirror what the APISIX control API returns, key plus value.
+ * The index signature is deliberate: APISIX sends more fields than we model, and the
+ * topology builder reads entries as plain records.
+ */
 export interface LiveRoute {
     key: string;
     value: {
         id: string;
-        uri: string;
+        uri?: string;
+        uris?: string[];
+        name?: string;
+        desc?: string;
         status: number;
         plugins?: Record<string, unknown>;
-        upstream_id?: number;
+        upstream_id?: string | number;
+        upstream?: LiveInlineUpstream;
+        service_id?: string | number;
+        plugin_config_id?: string | number;
+        [key: string]: unknown;
     };
 }
 
@@ -33,7 +54,11 @@ export interface LiveUpstream {
     value: {
         id: string;
         type: string;
+        name?: string;
+        desc?: string;
+        scheme?: string;
         nodes?: LiveNodes;
+        [key: string]: unknown;
     };
 }
 
@@ -44,7 +69,8 @@ export interface LiveService {
         name?: string;
         desc?: string;
         upstream_id?: string | number;
-        upstream?: { nodes?: LiveNodes };
+        upstream?: LiveInlineUpstream;
         plugins?: Record<string, unknown>;
+        [key: string]: unknown;
     };
 }
