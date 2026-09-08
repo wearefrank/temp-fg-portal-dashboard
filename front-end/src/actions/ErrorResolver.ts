@@ -42,7 +42,7 @@ type errorType = 'anyof' | 'direct';
 
 class ErrorResolver {
     // these keywords are internal to our validation pipeline and don't make sense to show to the user
-    private skippedKeywords = ['detectPlugins'];
+    private skippedKeywords = ['detectPlugins', 'detectPluginMetadata'];
 
     public resolve(collections: AjvErrorCollection[]): ResolvedError[] {
         const resolvedErrors: ResolvedError[] = [];

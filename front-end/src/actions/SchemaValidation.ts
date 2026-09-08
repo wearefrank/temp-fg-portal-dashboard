@@ -3,6 +3,7 @@ import addFormats from 'ajv-formats';
 import type {DataValidationCxt} from "ajv/lib/types";
 import { getResourceType } from './ValidationLogger';
 import type {AjvErrorCollection} from "./ErrorResolver.ts";
+import { STANDALONE_DEFINITIONS } from '../config/standaloneSections';
 
 // Type aliases for better readability
 export type JsonSchema = Record<string, unknown>;
@@ -17,6 +18,8 @@ export interface ApisixConfig {
 interface PluginDef {
     schema?: JsonSchema;
     consumer_schema?: JsonSchema;
+    // shape of a plugin_metadata entry - only present for plugins that accept metadata
+    metadata_schema?: JsonSchema;
     [key: string]: unknown; // fallback for unknown keys
 }
 
@@ -58,6 +61,9 @@ export class SchemaValidator {
     // cache of the compiled root validator - reset when schema changes
     private compiledRootValidator: ValidateFunction | null = null;
 
+    // cache of schema.main merged with the standalone-only sections - reset when schema changes
+    private mergedDefinitions: JsonSchema | null = null;
+
     constructor() {
         this.ajv = new Ajv({
             allErrors: true,
@@ -68,6 +74,7 @@ export class SchemaValidator {
         addFormats(this.ajv);
 
         this.addPluginDetection();
+        this.addPluginMetadataDetection();
     }
 
     public validateConfig(): RawConfigValidation {
@@ -78,16 +85,10 @@ export class SchemaValidator {
             return { valid: false, errorCollections: [], warningErrors: [], warnings: [] };
         }
 
-        if (!this.schema?.main || !this.isJsonSchema(this.schema.main)) {
+        const definitions = this.getDefinitions();
+        if (!definitions) {
             return { valid: false, errorCollections: [], warningErrors: [], warnings: [] };
         }
-
-        // clone before mutating - this.schema.main is the same object handed to the Monaco/monaco-yaml
-        // schema sync (see monacoSchemaSync.ts), which doesn't know about our detectPlugins keyword
-        const definitions = structuredClone(this.schema.main);
-
-        // mutate definitions to inject the detectPlugins keyword on every `plugins` property
-        this.injectPluginDetectionProperties(definitions);
 
         // we get the proper plugin schema and give it to the validator
         const properties = this.buildValidationProperties(definitions);
@@ -191,22 +192,48 @@ export class SchemaValidator {
         })
     }
 
+    // same idea as addPluginDetection, but plugin_metadata entries name their plugin in an `id`
+    // field instead of sitting under a `plugins` map, so they need their own hook
+    public addPluginMetadataDetection() {
+        const validateMetadata: PluginValidator = (
+            _schema: JsonSchema,
+            data: unknown,
+            _parentSchema: unknown,
+            dataCtx?: DataValidationCxt,
+        ) => {
+            const path = dataCtx?.instancePath || '';
+            const entry = (data || {}) as Record<string, unknown>;
+
+            if (this.validatePluginMetadata(entry, path)) return true;
+
+            validateMetadata.errors = [{
+                keyword: 'detectPluginMetadata',
+                message: `Metadata for plugin '${String(entry.id)}' is invalid.`,
+                params: { failedPlugin: entry.id },
+                instancePath: path,
+            }];
+            return false;
+        };
+
+        this.ajv.addKeyword({
+            keyword: 'detectPluginMetadata',
+            type: 'object',
+            validate: validateMetadata,
+            errors: true
+        })
+    }
+
     public validateCategory(categoryName: string, data: Record<string, unknown>): AjvErrorCollection[] {
         this.pluginErrorBatch = [];
         this.pluginWarningBatch = [];
 
-        if (!this.schema?.main) return [];
+        const definitions = this.getDefinitions();
+        if (!definitions) return [];
 
-        const definitions = this.schema.main;
-        const rawCategorySchema = definitions[categoryName] as JsonSchema | undefined;
+        // already cloned and keyword-injected by getDefinitions()
+        const categorySchema = definitions[categoryName] as JsonSchema | undefined;
 
-        if (!rawCategorySchema || !this.isJsonSchema(rawCategorySchema)) return [];
-
-        // clone before mutating - definitions is the same object handed to the Monaco/monaco-yaml
-        // schema sync (see monacoSchemaSync.ts), which doesn't know about our detectPlugins keyword
-        const categorySchema = structuredClone(rawCategorySchema);
-
-        this.injectPluginDetectionProperties({ [categoryName]: categorySchema });
+        if (!categorySchema || !this.isJsonSchema(categorySchema)) return [];
 
         try {
             const validate = this.ajv.compile({
@@ -242,34 +269,70 @@ export class SchemaValidator {
 
         this.applySchemaDefaults(pluginSchema, pluginConfig);
 
-        const cacheKey = `${resourceType}::${pluginName}`;
+        // a schema that won't compile counts against the plugin here
+        return this.runSchemaValidation(`${resourceType}::${pluginName}`, pluginSchema, pluginConfig, pluginPath, pluginName) ?? false;
+    }
+
+    // one `plugin_metadata` entry, checked against the metadata_schema of the plugin its `id` names
+    private validatePluginMetadata(entry: Record<string, unknown>, path: string): boolean {
+        const pluginName = String(entry.id ?? '');
+        const pluginDef = this.findPluginDef(pluginName);
+        const metadataSchema = pluginDef?.metadata_schema;
+
+        // only some plugins accept metadata, so a missing metadata_schema is normal
+        if (!metadataSchema || !this.isJsonSchema(metadataSchema)) {
+            const reason = pluginDef ? 'has no metadata schema' : 'is unknown (no schema found)';
+            this.pluginWarningBatch.push({ message: `Plugin '${pluginName}' ${reason}.`, path });
+            return true;
+        }
+
+        this.fixSchemaTypes(metadataSchema);
+
+        // id names the plugin, it isn't a metadata field - stripped on a copy so schemas with
+        // additionalProperties: false don't reject it and defaults stay off the parsed config
+        const metadata = { ...entry };
+        delete metadata.id;
+        this.applySchemaDefaults(metadataSchema, metadata);
+
+        // a schema that won't compile is our problem, so the entry stays unjudged
+        // the prefix keeps the cache key clear of the `${resourceType}::${pluginName}` ones
+        return this.runSchemaValidation(`metadata::${pluginName}`, metadataSchema, metadata, path, pluginName) ?? true;
+    }
+
+    // compile (cached), validate, and batch whatever fails. Returns null when the schema itself
+    // won't compile, leaving it to the caller to say what an unverifiable payload means.
+    private runSchemaValidation(
+        cacheKey: string,
+        schema: JsonSchema,
+        payload: unknown,
+        path: string,
+        parent: string,
+    ): boolean | null {
         let validate = this.pluginSchemasCache.get(cacheKey);
 
         if (!validate) {
             try {
-                validate = this.ajv.compile(pluginSchema);
+                validate = this.ajv.compile(schema);
                 this.pluginSchemasCache.set(cacheKey, validate);
             } catch (err: unknown) {
                 const errorMessage = err instanceof Error ? err.message : String(err);
-                this.pluginWarningBatch.push({ message: `Failed to compile schema: ${errorMessage}`, path: pluginPath });
-                return false;
+                this.pluginWarningBatch.push({ message: `Failed to compile schema: ${errorMessage}`, path });
+                return null;
             }
         }
 
-        const valid = validate(pluginConfig);
-
-        if (valid) {
+        if (validate(payload)) {
             return true;
         }
 
         if (validate.errors) {
-            const filteredErrors = this.filterTemplateErrors([...validate.errors], pluginConfig);
+            const filteredErrors = this.filterTemplateErrors([...validate.errors], payload);
             if (filteredErrors.length === 0) {
                 return true;
             }
             this.pluginErrorBatch.push({
-                type: pluginPath,
-                parent: pluginName,
+                type: path,
+                parent: parent,
                 sourceErrors: filteredErrors,
             });
         }
@@ -277,14 +340,13 @@ export class SchemaValidator {
         return false;
     }
 
+    // plugins and stream_plugins are separate maps in the catalog, a name lives in one or the other
+    private findPluginDef(pluginName: string): PluginDef | null {
+        return this.schema?.plugins?.[pluginName] ?? this.schema?.stream_plugins?.[pluginName] ?? null;
+    }
+
     private findPluginSchema(pluginName: string, resourceType: string): JsonSchema | null {
-        if (!this.schema) return null;
-
-
-        const plugins = this.schema.plugins;
-        const streamPlugins = this.schema.stream_plugins;
-
-        const pluginDef = plugins?.[pluginName] || streamPlugins?.[pluginName];
+        const pluginDef = this.findPluginDef(pluginName);
 
         if (!pluginDef) {
             return null;
@@ -322,6 +384,12 @@ export class SchemaValidator {
                 if (!isNaN(val)) {
                     schema[key] = val;
                 }
+            }
+
+            // APISIX ships opentelemetry's `resource` with a list of allowed variants here, but
+            // JSON Schema only takes a boolean or one schema - fold the list into an anyOf
+            if (key === 'additionalProperties' && Array.isArray(schema[key])) {
+                schema[key] = { anyOf: schema[key] };
             }
 
             if (this.isJsonSchema(schema[key])) {
@@ -396,7 +464,23 @@ export class SchemaValidator {
     public setSchema(schema: SchemaCatalog | null) {
         this.schema = schema;
         this.compiledRootValidator = null;
+        this.mergedDefinitions = null;
         this.pluginSchemasCache.clear();
+    }
+
+    // schema.main plus the standalone-only sections, cloned before we inject our own keywords -
+    // the raw main is the same object handed to monacoSchemaSync.ts, which knows none of them
+    private getDefinitions(): JsonSchema | null {
+        if (!this.schema?.main || !this.isJsonSchema(this.schema.main)) return null;
+
+        if (!this.mergedDefinitions) {
+            // main wins on a name clash, so a future APISIX that does publish one of these takes over
+            const merged = structuredClone({ ...STANDALONE_DEFINITIONS, ...this.schema.main });
+            this.injectPluginDetectionProperties(merged);
+            this.mergedDefinitions = merged;
+        }
+
+        return this.mergedDefinitions;
     }
 
     public getSchema(): SchemaCatalog | null {

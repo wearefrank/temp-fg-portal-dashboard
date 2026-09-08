@@ -854,3 +854,128 @@ describe('SchemaValidator — chained: template placeholders do NOT rescue indir
         expect(v.validateConfig().valid).toBe(false);
     });
 });
+
+// ---------------------------------------------------------------------------
+// plugin_metadata - standalone-only, so APISIX never publishes a definition for it
+// ---------------------------------------------------------------------------
+
+function makeMetadataSchema(): SchemaCatalog {
+    return {
+        main: {
+            route: {
+                type: 'object',
+                properties: { id: { type: 'string' }, uri: { type: 'string' } },
+            },
+        },
+        plugins: {
+            opentelemetry: {
+                metadata_schema: {
+                    type: 'object',
+                    properties: {
+                        resource: { type: 'object' },
+                        collector: {
+                            type: 'object',
+                            properties: { address: { type: 'string' }, request_timeout: { type: 'integer' } },
+                        },
+                    },
+                    additionalProperties: false,
+                },
+            },
+            'key-auth': {
+                schema: { type: 'object', properties: { key: { type: 'string' } } },
+            },
+        },
+    };
+}
+
+describe('SchemaValidator.validateConfig() — plugin_metadata', () => {
+    it('is not reported as an unknown top-level key', () => {
+        const v = new SchemaValidator();
+        v.setSchema(makeMetadataSchema());
+        v.setConfig({ plugin_metadata: [{ id: 'opentelemetry', resource: { 'service.name': 'ladybug' } }] });
+        const result = v.validateConfig();
+        expect(result.warningErrors).toHaveLength(0);
+        expect(result.valid).toBe(true);
+    });
+
+    it('validates the entry against the plugin metadata_schema', () => {
+        const v = new SchemaValidator();
+        v.setSchema(makeMetadataSchema());
+        v.setConfig({
+            plugin_metadata: [
+                { id: 'opentelemetry', collector: { address: 'host:4318', request_timeout: 'soon' } },
+            ],
+        });
+        const result = v.validateConfig();
+        expect(result.valid).toBe(false);
+        // the root collection only holds the detectPluginMetadata wrapper, the real error is
+        // batched separately under the entry's path (same shape as plugin errors)
+        const entryErrors = result.errorCollections.find(c => c.type === '/plugin_metadata/0');
+        expect(entryErrors?.parent).toBe('opentelemetry');
+        expect(entryErrors?.sourceErrors[0].instancePath).toBe('/collector/request_timeout');
+    });
+
+    it('does not treat id as an unknown property on a strict metadata_schema', () => {
+        const v = new SchemaValidator();
+        v.setSchema(makeMetadataSchema());
+        // opentelemetry's metadata_schema is additionalProperties: false, so leaving id in
+        // the payload would flag it
+        v.setConfig({ plugin_metadata: [{ id: 'opentelemetry', resource: {} }] });
+        expect(v.validateConfig().valid).toBe(true);
+    });
+
+    it('requires an id', () => {
+        const v = new SchemaValidator();
+        v.setSchema(makeMetadataSchema());
+        v.setConfig({ plugin_metadata: [{ resource: {} }] });
+        expect(v.validateConfig().valid).toBe(false);
+    });
+
+    it('warns instead of failing when the plugin takes no metadata', () => {
+        const v = new SchemaValidator();
+        v.setSchema(makeMetadataSchema());
+        v.setConfig({ plugin_metadata: [{ id: 'key-auth', foo: 1 }] });
+        const result = v.validateConfig();
+        expect(result.valid).toBe(true);
+        expect(result.warnings).toEqual([
+            { message: "Plugin 'key-auth' has no metadata schema.", path: '/plugin_metadata/0' },
+        ]);
+    });
+
+    it('warns that the plugin is unknown when the id is not in the catalog', () => {
+        const v = new SchemaValidator();
+        v.setSchema(makeMetadataSchema());
+        v.setConfig({ plugin_metadata: [{ id: 'opentelemtry' }] });
+        const result = v.validateConfig();
+        expect(result.valid).toBe(true);
+        expect(result.warnings[0].message).toBe("Plugin 'opentelemtry' is unknown (no schema found).");
+    });
+
+    it('compiles a metadata_schema whose additionalProperties is a list of variants', () => {
+        const schema = makeMetadataSchema();
+        // shape APISIX actually serves for opentelemetry's `resource` - JSON Schema only allows a
+        // boolean or a single schema here, so without normalising it AJV refuses the whole schema
+        (schema.plugins!.opentelemetry.metadata_schema as Record<string, unknown>).properties = {
+            resource: {
+                type: 'object',
+                additionalProperties: [{ type: 'boolean' }, { type: 'number' }, { type: 'string' }],
+            },
+        };
+
+        const v = new SchemaValidator();
+        v.setSchema(schema);
+        v.setConfig({ plugin_metadata: [{ id: 'opentelemetry', resource: { 'service.name': 'ladybug' } }] });
+        const result = v.validateConfig();
+        expect(result.warnings).toEqual([]);
+        expect(result.valid).toBe(true);
+    });
+
+    it('skips fields holding a ${{...}} placeholder', () => {
+        const v = new SchemaValidator();
+        v.setSchema(makeMetadataSchema());
+        v.setConfig({
+            plugin_metadata: [{ id: 'opentelemetry', collector: { request_timeout: '${{ TIMEOUT }}' } }],
+        });
+        expect(v.validateConfig().valid).toBe(true);
+    });
+});
