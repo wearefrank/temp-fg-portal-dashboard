@@ -1,7 +1,13 @@
-import type { GithubSettings, GitlabSettings, GiteaSettings } from './types';
+import type { FileProfile, GithubSettings, GitlabSettings, GiteaSettings } from './types';
 import { migrateGithubSettings, migrateGitlabSettings, migrateGiteaSettings } from './types';
 
 export type GitProvider = 'github' | 'gitlab' | 'gitea';
+
+/** Narrows anything unrecognised to github, the default this console started with. */
+export function toGitProvider(value: string | null): GitProvider {
+    if (value === 'gitlab' || value === 'gitea') return value;
+    return 'github';
+}
 
 export const GITHUB_STORAGE_KEY = 'github-settings';
 export const GITLAB_STORAGE_KEY = 'gitlab-settings';
@@ -23,7 +29,47 @@ export function isLinked(provider: GitProvider): boolean {
     return linkedProviders.has(provider);
 }
 
-export function loadGithubSettings(): GithubSettings {
+/** The git connection this deployment pins through its environment. */
+export interface GitLock {
+    provider: GitProvider;
+    host: string;
+    repo: string;
+    branch: string;
+    filePath: string;
+}
+
+/**
+ * Null until the first fetch, and whenever nothing is pinned. Module level for the same
+ * reason as linkedProviders: getProviderHeaders() runs outside React.
+ *
+ * This only keeps the browser honest. The backend applies the same pin to every request,
+ * so a stale value here changes which repo the UI *claims*, never which one it reaches.
+ */
+let gitLock: GitLock | null = null;
+
+export function setGitLock(lock: GitLock | null): void {
+    gitLock = lock;
+}
+
+export function isGitLocked(): boolean {
+    return gitLock !== null;
+}
+
+/**
+ * The file list to show while the connection is pinned: the one file the environment
+ * names, and nothing the user had stored before. Anything else would put files in the
+ * dropdown that the backend refuses to read.
+ *
+ * An empty path means the connection was pinned without naming a file, which the settings
+ * panel reports as such rather than pretending there is one.
+ */
+function lockedProfiles(lock: GitLock): FileProfile[] {
+    if (!lock.filePath) return [];
+    const title = lock.filePath.split('/').pop() || lock.filePath;
+    return [{ title, filePath: lock.filePath }];
+}
+
+function readGithubSettings(): GithubSettings {
     try {
         const stored = localStorage.getItem(GITHUB_STORAGE_KEY);
         if (stored) return migrateGithubSettings(JSON.parse(stored));
@@ -33,7 +79,7 @@ export function loadGithubSettings(): GithubSettings {
     return { githubToken: '', githubRepo: '', githubBranch: '', profiles: [] };
 }
 
-export function loadGitlabSettings(): GitlabSettings {
+function readGitlabSettings(): GitlabSettings {
     try {
         const stored = localStorage.getItem(GITLAB_STORAGE_KEY);
         if (stored) return migrateGitlabSettings(JSON.parse(stored));
@@ -43,7 +89,7 @@ export function loadGitlabSettings(): GitlabSettings {
     return { gitlabToken: '', gitlabHost: '', gitlabProject: '', gitlabBranch: '', profiles: [] };
 }
 
-export function loadGiteaSettings(): GiteaSettings {
+function readGiteaSettings(): GiteaSettings {
     try {
         const stored = localStorage.getItem(GITEA_STORAGE_KEY);
         if (stored) return migrateGiteaSettings(JSON.parse(stored));
@@ -53,10 +99,47 @@ export function loadGiteaSettings(): GiteaSettings {
     return { giteaToken: '', giteaHost: '', giteaRepo: '', giteaBranch: '', profiles: [] };
 }
 
+// The load* functions below overlay the pinned connection on what the browser stored. The
+// token is never overlaid: it stays the user's own credential.
+
+export function loadGithubSettings(): GithubSettings {
+    const stored = readGithubSettings();
+    if (!gitLock) return stored;
+    return {
+        ...stored,
+        githubRepo: gitLock.repo,
+        githubBranch: gitLock.branch,
+        profiles: lockedProfiles(gitLock),
+    };
+}
+
+export function loadGitlabSettings(): GitlabSettings {
+    const stored = readGitlabSettings();
+    if (!gitLock) return stored;
+    return {
+        ...stored,
+        gitlabHost: gitLock.host,
+        gitlabProject: gitLock.repo,
+        gitlabBranch: gitLock.branch,
+        profiles: lockedProfiles(gitLock),
+    };
+}
+
+export function loadGiteaSettings(): GiteaSettings {
+    const stored = readGiteaSettings();
+    if (!gitLock) return stored;
+    return {
+        ...stored,
+        giteaHost: gitLock.host,
+        giteaRepo: gitLock.repo,
+        giteaBranch: gitLock.branch,
+        profiles: lockedProfiles(gitLock),
+    };
+}
+
 export function loadProvider(): GitProvider {
-    const stored = localStorage.getItem(PROVIDER_STORAGE_KEY);
-    if (stored === 'gitlab' || stored === 'gitea') return stored;
-    return 'github';
+    if (gitLock) return gitLock.provider;
+    return toGitProvider(localStorage.getItem(PROVIDER_STORAGE_KEY));
 }
 
 /**
@@ -83,6 +166,7 @@ export function getProviderHeaders(filePathOverride?: string): Record<string, st
         if (provider === 'gitea') {
             const s = loadGiteaSettings();
             const filePath = filePathOverride !== undefined ? filePathOverride : '';
+            // Gitea is never brokered through Keycloak, so its token always comes from the browser.
             return {
                 'X-Git-Provider': 'gitea',
                 'X-Gitea-Token': s.giteaToken || '',

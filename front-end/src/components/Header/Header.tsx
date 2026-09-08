@@ -78,9 +78,9 @@ export const Header = () => {
           <NavLink to="/yamlEditor" className={({ isActive }) => (isActive ? 'active' : undefined)}>
             YAML Editor
           </NavLink>
-          {/*<NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : undefined)}>*/}
-          {/*  History*/}
-          {/*</NavLink>*/}
+          <NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : undefined)}>
+            Git
+          </NavLink>
           {/*<NavLink to="/config" className={({ isActive }) => (isActive ? 'active' : undefined)}>*/}
           {/*  Config*/}
           {/*</NavLink>*/}

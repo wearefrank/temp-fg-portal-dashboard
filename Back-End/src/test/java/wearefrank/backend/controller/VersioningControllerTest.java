@@ -2,10 +2,12 @@ package wearefrank.backend.controller;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import wearefrank.backend.config.GitLockProperties;
 import wearefrank.backend.dto.ConfigVersionDto;
 import wearefrank.backend.service.GitIdentityService;
 import wearefrank.backend.service.VersioningService;
@@ -23,7 +25,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+// Nothing is pinned here, so these tests keep exercising the header path.
 @WebMvcTest(VersioningController.class)
+@EnableConfigurationProperties(GitLockProperties.class)
 class VersioningControllerTest {
 
     @Autowired

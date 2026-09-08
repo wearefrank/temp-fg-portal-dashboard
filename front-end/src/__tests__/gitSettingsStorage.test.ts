@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
     getProviderHeaders,
     setLinkedProviders,
+    setGitLock,
+    loadProvider,
+    loadGithubSettings,
     GITHUB_STORAGE_KEY,
     GITLAB_STORAGE_KEY,
     GITEA_STORAGE_KEY,
@@ -25,6 +28,7 @@ describe('getProviderHeaders', () => {
     beforeEach(() => {
         installLocalStorage();
         setLinkedProviders(new Set());
+        setGitLock(null);
     });
 
     it('sends the stored personal access token when the provider is not linked', () => {
@@ -89,4 +93,71 @@ describe('getProviderHeaders', () => {
         // A corrupt blob must not send a garbage token; the loader returns empty settings.
         expect(getProviderHeaders('routes.yaml')['X-Github-Token']).toBe('');
     });
+});
+
+describe('a pinned git connection', () => {
+    beforeEach(() => {
+        installLocalStorage();
+        setLinkedProviders(new Set());
+        setGitLock(null);
+    });
+
+    it('overrides the stored repo and branch, and keeps the token', () => {
+        localStorage.setItem(PROVIDER_STORAGE_KEY, 'gitea');
+        localStorage.setItem(GITHUB_STORAGE_KEY, JSON.stringify({
+            githubToken: 'ghp_secret', githubRepo: 'user/fork', githubBranch: 'scratch', profiles: [],
+        }));
+        setGitLock({
+            provider: 'github', host: '',
+            repo: 'ops/gateway-config', branch: 'main', filePath: 'config/apisix.yaml',
+        });
+
+        expect(getProviderHeaders('config/apisix.yaml')).toEqual({
+            'X-Git-Provider': 'github',
+            'X-Github-Token': 'ghp_secret',
+            'X-Github-Repo': 'ops/gateway-config',
+            'X-Github-Branch': 'main',
+            'X-Github-File-Path': 'config/apisix.yaml',
+        });
+    });
+
+    it('picks the pinned provider over the one stored in the browser', () => {
+        localStorage.setItem(PROVIDER_STORAGE_KEY, 'github');
+        setGitLock({
+            provider: 'gitlab', host: 'https://gitlab.example.com',
+            repo: 'ops/config', branch: 'main', filePath: 'apisix.yaml',
+        });
+
+        expect(loadProvider()).toBe('gitlab');
+    });
+
+    it('replaces the file list with the one pinned file, named after it', () => {
+        localStorage.setItem(GITHUB_STORAGE_KEY, JSON.stringify({
+            githubToken: '', githubRepo: '', githubBranch: '',
+            profiles: [{ title: 'Mine', filePath: 'other.yaml' }],
+        }));
+        setGitLock({
+            provider: 'github', host: '',
+            repo: 'ops/gateway-config', branch: 'main', filePath: 'config/apisix.yaml',
+        });
+
+        expect(loadGithubSettings().profiles).toEqual([
+            { title: 'apisix.yaml', filePath: 'config/apisix.yaml' },
+        ]);
+    });
+
+    it('shows no files when the connection is pinned without naming one', () => {
+        localStorage.setItem(GITHUB_STORAGE_KEY, JSON.stringify({
+            githubToken: '', githubRepo: '', githubBranch: '',
+            profiles: [{ title: 'Mine', filePath: 'other.yaml' }],
+        }));
+        setGitLock({
+            provider: 'github', host: '',
+            repo: 'ops/gateway-config', branch: 'main', filePath: '',
+        });
+
+        // Keeping the stored file would show one the backend now refuses to read.
+        expect(loadGithubSettings().profiles).toEqual([]);
+    });
+
 });

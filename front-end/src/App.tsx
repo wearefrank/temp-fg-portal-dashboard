@@ -6,7 +6,7 @@ import {Dashboard} from "./components/Dashboard/Dashboard.tsx";
 import YamlEditor from "./pages/yamlEditor/YamlEditor.tsx";
 import {TopologyPage} from "./pages/topology/TopologyPage.tsx";
 import {LiveTopologyPage} from "./pages/topology/LiveTopologyPage.tsx";
-// import {HistoryPage} from "./pages/history/HistoryPage.tsx";
+import {HistoryPage} from "./pages/history/HistoryPage.tsx";
 import {LoginPage} from "./pages/login/LoginPage.tsx";
 import { Header } from "./components/Header/Header.tsx";
 import { ConfigManagerProvider } from "./providers/ConfigManagerProvider.tsx";
@@ -39,7 +39,7 @@ function App() {
                 <Route path="/yamlEditor" element={<YamlEditor/>} />
                 <Route path="/topology" element={<TopologyPage/>} />
                 <Route path="/topology/live" element={<LiveTopologyPage/>} />
-                {/*<Route path="/history" element={<HistoryPage/>} />*/}
+                <Route path="/history" element={<HistoryPage/>} />
             </Route>
         </Routes>
     )

@@ -3,6 +3,7 @@ package wearefrank.backend.controller;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import wearefrank.backend.config.GitLockProperties;
 import wearefrank.backend.dto.ConfigVersionDto;
 import wearefrank.backend.service.GitIdentityService;
 import wearefrank.backend.service.VersioningService;
@@ -17,10 +18,14 @@ public class VersioningController {
 
     private final VersioningService versioningService;
     private final GitIdentityService gitIdentityService;
+    private final GitLockProperties gitLock;
 
-    public VersioningController(VersioningService versioningService, GitIdentityService gitIdentityService) {
+    public VersioningController(VersioningService versioningService,
+                                GitIdentityService gitIdentityService,
+                                GitLockProperties gitLock) {
         this.versioningService = versioningService;
         this.gitIdentityService = gitIdentityService;
+        this.gitLock = gitLock;
     }
 
     @GetMapping
@@ -61,44 +66,58 @@ public class VersioningController {
     }
 
     private String provider(HttpServletRequest req) {
+        if (gitLock.enabled()) return gitLock.provider();
         return header(req, "X-Git-Provider", "github");
     }
 
     private GitHubConfig githubConfig(HttpServletRequest req) {
         return new GitHubConfig(
                 token(req, "X-Github-Token", "github"),
-                header(req, "X-Github-Repo"),
-                header(req, "X-Github-Branch"),
-                header(req, "X-Github-File-Path"));
+                setting(req, "X-Github-Repo", gitLock.repo()),
+                setting(req, "X-Github-Branch", gitLock.branch()),
+                setting(req, "X-Github-File-Path", gitLock.filePath()));
     }
 
     private GitLabConfig gitlabConfig(HttpServletRequest req) {
         return new GitLabConfig(
                 token(req, "X-Gitlab-Token", "gitlab"),
-                header(req, "X-Gitlab-Host"),
-                header(req, "X-Gitlab-Project"),
-                header(req, "X-Gitlab-Branch"),
-                header(req, "X-Gitlab-File-Path"));
+                setting(req, "X-Gitlab-Host", gitLock.host()),
+                setting(req, "X-Gitlab-Project", gitLock.repo()),
+                setting(req, "X-Gitlab-Branch", gitLock.branch()),
+                setting(req, "X-Gitlab-File-Path", gitLock.filePath()));
     }
 
     /**
-     * A token sent by the browser still wins, so deployments without a brokered identity
-     * provider keep working on personal access tokens. Otherwise the token comes from the
-     * user's Keycloak account link and never touches the browser at all.
+     * In order: a token pinned by the deployment, then one the browser sent, then the
+     * user's Keycloak account link. The pinned one wins because a deployment that supplies
+     * a token gives its users no way to enter one of their own.
+     *
+     * brokerAlias is null for providers Keycloak does not broker.
      */
     private String token(HttpServletRequest req, String headerName, String brokerAlias) {
+        if (gitLock.hasToken()) return gitLock.token();
         String fromHeader = header(req, headerName);
         if (!fromHeader.isBlank()) return fromHeader;
+        if (brokerAlias == null) return "";
         return gitIdentityService.brokeredToken(brokerAlias).orElse("");
     }
 
     private GiteaConfig giteaConfig(HttpServletRequest req) {
         return new GiteaConfig(
-                header(req, "X-Gitea-Token"),
-                header(req, "X-Gitea-Host"),
-                header(req, "X-Gitea-Repo"),
-                header(req, "X-Gitea-Branch"),
-                header(req, "X-Gitea-File-Path"));
+                token(req, "X-Gitea-Token", null),
+                setting(req, "X-Gitea-Host", gitLock.host()),
+                setting(req, "X-Gitea-Repo", gitLock.repo()),
+                setting(req, "X-Gitea-Branch", gitLock.branch()),
+                setting(req, "X-Gitea-File-Path", gitLock.filePath()));
+    }
+
+    /**
+     * One connection setting: the deployment's fixed value while the git connection is
+     * locked, otherwise whatever the browser sent. Locking has to bite here rather than in
+     * the UI, since the headers are the user's to forge.
+     */
+    private String setting(HttpServletRequest req, String headerName, String lockedValue) {
+        return gitLock.enabled() ? lockedValue : header(req, headerName);
     }
 
     private String header(HttpServletRequest req, String name) {

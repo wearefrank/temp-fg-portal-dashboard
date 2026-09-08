@@ -19,9 +19,11 @@ import {
     loadGitlabSettings,
     loadGiteaSettings,
     loadProvider,
+    isGitLocked,
     type GitProvider,
 } from './gitSettingsStorage';
 import { fetchGitIdentities, startGitLink, type GitIdentityMap } from '../../api/gitIdentity';
+import { fetchGitLock } from '../../api/gitLock';
 import styles from './HistoryPage.module.css';
 
 // sentinel value used in place of a real commit sha to represent the in-memory (unsaved) state
@@ -108,6 +110,10 @@ export const HistoryPage: React.FC = () => {
     // Settings panel
     const [settingsOpen, setSettingsOpen] = useState(false);
 
+    // True when the deployment pins the connection, which makes every field below read-only.
+    const [locked, setLocked] = useState(isGitLocked);
+
+
     // Keycloak account links; empty until the first fetch, which treats any failure as
     // "nothing is brokered" so the personal-access-token fields stay usable.
     const [identities, setIdentities] = useState<GitIdentityMap>({});
@@ -155,8 +161,40 @@ export const HistoryPage: React.FC = () => {
         }));
     };
 
+    // --- Deployment-pinned connection ---
+
+    /**
+     * The pin decides which repository everything else asks about, so the first existence
+     * checks wait for it rather than running once per repo. When it lands, the settings
+     * initialised from localStorage are read again with the pinned values overlaid;
+     * useVersionHistory refetches on its own once the active file path changes.
+     */
+    const applyGitLock = async () => {
+        const lock = await fetchGitLock();
+        setLocked(lock !== null);
+
+        if (!lock) {
+            checkAllProfiles(provider, githubSettings, gitlabSettings, giteaSettings);
+            return;
+        }
+
+        const lockedProvider = loadProvider();
+        const github = loadGithubSettings();
+        const gitlab = loadGitlabSettings();
+        const gitea = loadGiteaSettings();
+
+        // No drafts: they only feed the settings panel, which a pinned deployment hides.
+        setProvider(lockedProvider);
+        setGithubSettings(github);
+        setGitlabSettings(gitlab);
+        setGiteaSettings(gitea);
+        setActiveProfileIndex(0);
+
+        checkAllProfiles(lockedProvider, github, gitlab, gitea);
+    };
+
     useEffect(() => {
-        checkAllProfiles(provider, githubSettings, gitlabSettings, giteaSettings);
+        applyGitLock();
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -466,6 +504,9 @@ export const HistoryPage: React.FC = () => {
         : provider === 'gitlab' ? styles.providerBadgeGitlab
         : styles.providerBadgeGitea;
 
+    // A pinned deployment has nothing here for anyone to change, so the panel goes.
+    const showSettings = !locked;
+
     /**
      * Token row for a provider Keycloak can broker. Three states: linked (token lives in
      * Keycloak, no input at all), brokered but not linked yet (a Link button, with the
@@ -628,16 +669,18 @@ export const HistoryPage: React.FC = () => {
                     <span className={`text-small ${styles.providerBadge} ${providerBadgeClass}`}>
                         {providerLabel}
                     </span>
-                    <button
-                        className="text-small"
-                        onClick={() => settingsOpen ? cancelSettings() : openSettings()}
-                    >
-                        Settings
-                    </button>
+                    {showSettings && (
+                        <button
+                            className="text-small"
+                            onClick={() => settingsOpen ? cancelSettings() : openSettings()}
+                        >
+                            Settings
+                        </button>
+                    )}
                 </div>
             </div>
 
-            {settingsOpen && (
+            {settingsOpen && showSettings && (
                 <div className={`card ${styles.settingsCard}`}>
                     <div className="card-header">
                         <span>Git Settings</span>
