@@ -31,7 +31,7 @@ export const LoginPage: React.FC = () => {
 
                 // Never hand straight back to a provider that just turned us away: that is a
                 // redirect loop, and an unreachable provider would spin in it indefinitely.
-                if (next.type === 'OIDC' && !failed) {
+                if (next.type === 'OAUTH2' && !failed) {
                     setView('redirecting');
                     window.location.href = next.loginUrl;
                     return;
@@ -53,7 +53,7 @@ export const LoginPage: React.FC = () => {
         if (csrfField.current) csrfField.current.value = getCsrfToken() ?? '';
     };
 
-    const errorMessage = mode?.type === 'OIDC'
+    const errorMessage = mode?.type === 'OAUTH2'
         ? 'Signing in with your identity provider did not work. It may be unavailable - try again in a moment.'
         // Never say which half was wrong: that tells an attacker which usernames exist.
         : 'Invalid username or password.';
@@ -77,7 +77,7 @@ export const LoginPage: React.FC = () => {
                     </p>
                 )}
 
-                {view === 'ready' && mode?.type === 'OIDC' && (
+                {view === 'ready' && mode?.type === 'OAUTH2' && (
                     <button
                         type="button"
                         className={`btn-primary ${styles.submit}`}

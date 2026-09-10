@@ -61,7 +61,7 @@ class GitIdentityServiceTest {
 
     private GitIdentityService newService(String issuer, String providers) {
         return new GitIdentityService(httpClient, new ObjectMapper(), authorizedClientManager,
-                "OIDC", issuer, CLIENT_ID, providers);
+                new GitIdentityService.BrokerSettings(issuer, CLIENT_ID), providers);
     }
 
     @SuppressWarnings("unchecked")

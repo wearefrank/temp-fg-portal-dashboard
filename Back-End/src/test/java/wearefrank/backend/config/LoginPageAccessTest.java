@@ -28,10 +28,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                "console.security.auth.type=IN_MEMORY",
-                "console.security.auth.in-memory.users[0].username=admin",
-                "console.security.auth.in-memory.users[0].password={noop}secret",
-                "console.security.auth.in-memory.users[0].roles=gateway-admin"
+                "application.security.console.authentication.type=IN_MEMORY",
+                "application.security.console.authentication.in-memory.users[0].username=admin",
+                "application.security.console.authentication.in-memory.users[0].password={noop}secret",
+                "application.security.console.authentication.in-memory.users[0].roles=gateway-admin"
         })
 class LoginPageAccessTest {
 

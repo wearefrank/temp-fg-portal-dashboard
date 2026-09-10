@@ -58,6 +58,12 @@ export function logout(): void {
 }
 
 /**
+ * Set by the backend on a 401 it raised about our own session. A 401 without it was
+ * relayed from an upstream service, such as GitHub rejecting a git token.
+ */
+export const SESSION_EXPIRED_HEADER = 'X-Session-Expired';
+
+/**
  * fetch() wrapper that keeps the session working: sends the CSRF token on writes and
  * bounces to the login page when the session is gone. Use this instead of bare fetch()
  * for anything under /api.
@@ -73,7 +79,9 @@ export async function apiFetch(input: string, init: RequestInit = {}): Promise<R
 
     const response = await fetch(input, { ...init, headers, credentials: 'same-origin' });
 
-    if (response.status === 401) {
+    // A 401 without the header was relayed from an upstream service, so let the caller
+    // show it as an error instead of signing the user out.
+    if (response.status === 401 && response.headers.get(SESSION_EXPIRED_HEADER) !== null) {
         redirectToLogin();
         throw new Error('Not authenticated - redirecting to login');
     }

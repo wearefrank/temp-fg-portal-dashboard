@@ -12,23 +12,21 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 
 import java.util.List;
 
 /**
- * Logs the console in against users listed in configuration, for deployments that cannot
- * run an identity provider. Everything OIDC gets from Keycloak - single sign-on, group
- * mapping, git-token brokering - is simply absent here; git falls back to personal access
- * tokens, which {@code VersioningController} already prefers when present.
+ * Logs users in against a list of accounts in the configuration, for deployments without an
+ * identity provider. No single sign-on, no group mapping and no git-token brokering: git
+ * falls back to personal access tokens.
  */
 @Configuration
-@ConditionalOnProperty(name = "console.security.auth.type", havingValue = InMemoryAuthenticatorConfig.TYPE)
+@ConditionalOnProperty(name = OAuth2Properties.PREFIX + ".type", havingValue = InMemoryAuthenticatorConfig.TYPE)
 @EnableConfigurationProperties(InMemoryUserProperties.class)
 public class InMemoryAuthenticatorConfig implements ConsoleAuthenticator {
 
-    static final String TYPE = "IN_MEMORY";
+    public static final String TYPE = "IN_MEMORY";
 
     private static final Logger log = LoggerFactory.getLogger(InMemoryAuthenticatorConfig.class);
 
@@ -44,10 +42,9 @@ public class InMemoryAuthenticatorConfig implements ConsoleAuthenticator {
 
     @Override
     public void configure(HttpSecurity http) throws Exception {
-        // loginPage points at the SPA's own route, so Spring stops generating a page of its
-        // own. The POST goes to a separate path rather than back to /login: the dev server
-        // has to serve the page itself while forwarding the submission to us, and it can
-        // only tell the two apart by path.
+        // loginPage points at the frontend route, so Spring does not generate its own page.
+        // The POST uses a separate path so the dev server can serve the page and still
+        // forward the submission to us.
         http.formLogin(form -> form
                 .loginPage(loginUrl())
                 .loginProcessingUrl("/login/password")
@@ -65,12 +62,12 @@ public class InMemoryAuthenticatorConfig implements ConsoleAuthenticator {
         List<InMemoryUserProperties.ConsoleUser> configured =
                 properties.users() == null ? List.of() : properties.users();
 
-        // Failing here beats Spring Boot's fallback, which invents a user with a random
-        // password and prints it to the log - a working account nobody provisioned.
+        // Without this Spring Boot creates a default user with a random password, which
+        // is a working account nobody configured.
         if (configured.isEmpty()) {
             throw new IllegalStateException(
-                    "console.security.auth.type is " + TYPE + " but no users are configured. "
-                            + "Set console.security.auth.in-memory.users[0].username/password/roles.");
+                    OAuth2Properties.PREFIX + ".type is " + TYPE + " but no users are configured. "
+                            + "Set " + InMemoryUserProperties.PREFIX + ".users[0].username/password/roles.");
         }
 
         List<UserDetails> users = configured.stream().map(this::toUserDetails).toList();
@@ -91,14 +88,5 @@ public class InMemoryAuthenticatorConfig implements ConsoleAuthenticator {
                 .password(configured.password())
                 .roles(roles.toArray(String[]::new))
                 .build();
-    }
-
-    /**
-     * Placeholder so {@code GitIdentityService} still wires up. It is never consulted:
-     * that service short-circuits on a blank issuer URI, which is the state here.
-     */
-    @Bean
-    OAuth2AuthorizedClientManager authorizedClientManager() {
-        return request -> null;
     }
 }

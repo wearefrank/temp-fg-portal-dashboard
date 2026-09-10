@@ -14,27 +14,31 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
+import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
+
+import java.util.Map;
 
 /**
  * Logs the console in through an OpenID Connect provider. This is the default and the
  * only type that supports single sign-on, group mapping and git-token brokering.
  */
 @Configuration
-@ConditionalOnProperty(name = "console.security.auth.type", havingValue = OidcAuthenticatorConfig.TYPE)
-@EnableConfigurationProperties(OidcProperties.class)
+@ConditionalOnProperty(name = OAuth2Properties.PREFIX + ".type", havingValue = OidcAuthenticatorConfig.TYPE)
+@EnableConfigurationProperties(OAuth2Properties.class)
 public class OidcAuthenticatorConfig implements ConsoleAuthenticator {
 
-    static final String TYPE = "OIDC";
+    /** Named to match the Frank!Framework console, so both read the same settings file. */
+    public static final String TYPE = "OAUTH2";
 
     /**
-     * Part of the login URL the frontend navigates to and of the redirect_uri registered
-     * with the provider, so it is effectively public API - renaming it breaks both.
+     * Appears in the login URL and in the redirect_uri registered with the provider, so
+     * renaming it breaks both.
      */
     public static final String REGISTRATION_ID = "keycloak";
 
-    private final OidcProperties properties;
+    private final OAuth2Properties properties;
 
-    public OidcAuthenticatorConfig(OidcProperties properties) {
+    public OidcAuthenticatorConfig(OAuth2Properties properties) {
         this.properties = properties;
     }
 
@@ -48,44 +52,98 @@ public class OidcAuthenticatorConfig implements ConsoleAuthenticator {
         return "/oauth2/authorization/" + REGISTRATION_ID;
     }
 
+    /** The only authenticator that can fetch a git token from the provider for the user. */
+    @Override
+    public boolean brokersGitTokens() {
+        return true;
+    }
+
     @Override
     public void configure(HttpSecurity http) throws Exception {
         OidcClientInitiatedLogoutSuccessHandler logoutSuccessHandler =
                 new OidcClientInitiatedLogoutSuccessHandler(clientRegistrationRepository());
         logoutSuccessHandler.setPostLogoutRedirectUri("{baseUrl}");
 
-        // The console's page, not the hand-off endpoint. Naming a custom page is what stops
-        // Spring generating one at /login - it only skips that by itself when it can
-        // enumerate registrations, and the lazy repository deliberately cannot. Pointing it
-        // at the hand-off endpoint instead would loop forever whenever the provider is
-        // unreachable, because a failed authorization request redirects back to the login
-        // page, which would be the request that just failed.
-        http
-                .oauth2Login(oauth2 -> oauth2.loginPage(LOGIN_PAGE))
+        http.oauth2Login(oauth2 -> oauth2
+                        .loginPage(LOGIN_PAGE)
+                        .userInfoEndpoint(userInfo -> userInfo.oidcUserService(oidcUserService())))
                 .logout(logout -> logout.logoutSuccessHandler(logoutSuccessHandler));
     }
 
     @Bean
     ClientRegistrationRepository clientRegistrationRepository() {
-        return new LazyClientRegistrationRepository(REGISTRATION_ID, this::loadRegistration);
+        return new LazyClientRegistrationRepository(REGISTRATION_ID, this::buildRegistration);
     }
 
-    private ClientRegistration loadRegistration() {
-        return ClientRegistrations.fromIssuerLocation(properties.issuerUri())
-                .registrationId(REGISTRATION_ID)
+    /** Turns the configured role claim into Spring authorities, so hasRole() sees realm roles. */
+    private RoleClaimOidcUserService oidcUserService() {
+        return new RoleClaimOidcUserService(properties.authoritiesClaimName());
+    }
+
+    /**
+     * Builds the registration the login flow uses. Called on first login, not at startup;
+     * see {@link LazyClientRegistrationRepository}.
+     *
+     * Only the "custom" provider is supported, since the provider is always configured by
+     * the operator. Anything else is rejected instead of treated as custom.
+     */
+    ClientRegistration buildRegistration() {
+        if (!properties.isCustomProvider()) {
+            throw new IllegalStateException(OAuth2Properties.PREFIX + ".provider is '"
+                    + properties.provider() + "', but only '" + OAuth2Properties.CUSTOM_PROVIDER
+                    + "' is supported. Configure the endpoints, or the issuer to discover them from.");
+        }
+
+        return baseBuilder()
                 .clientId(properties.clientId())
                 .clientSecret(properties.clientSecret())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
-                .scope(properties.scope())
+                .scope(properties.scopes())
+                // Decides authentication.getName(). The default is "sub", a UUID.
+                .userNameAttributeName(properties.userNameAttributeName())
                 .build();
     }
 
     /**
-     * Lets the app reuse the login's access token for its own calls to the provider, and
-     * refresh it when it expires. oauth2Login by itself never refreshes, and Keycloak's
-     * access tokens live an hour - shorter than a working session, so without this the
-     * broker-token lookups would start failing mid-session.
+     * Where the endpoints come from: the configuration if all four are set, otherwise the
+     * issuer's discovery document, fetched on this first login.
+     */
+    private ClientRegistration.Builder baseBuilder() {
+        if (properties.hasExplicitEndpoints()) return explicitEndpoints();
+
+        if (properties.issuerUri() == null || properties.issuerUri().isBlank()) {
+            throw new IllegalStateException("Set " + OAuth2Properties.PREFIX + ".issuerUri, or all four of "
+                    + "authorizationUri, tokenUri, userInfoUri and jwkSetUri.");
+        }
+        return ClientRegistrations.fromIssuerLocation(properties.issuerUri())
+                .registrationId(REGISTRATION_ID);
+    }
+
+    private ClientRegistration.Builder explicitEndpoints() {
+        ClientRegistration.Builder builder = ClientRegistration.withRegistrationId(REGISTRATION_ID)
+                .clientName(REGISTRATION_ID)
+                .authorizationUri(properties.authorizationUri())
+                .tokenUri(properties.tokenUri())
+                .userInfoUri(properties.userInfoUri())
+                .jwkSetUri(properties.jwkSetUri())
+                .issuerUri(properties.issuerUri());
+
+        // Discovery would normally supply this. Without it logout clears our session but
+        // not the provider's, so the next login signs the same user back in.
+        String endSessionUri = properties.resolvedEndSessionUri();
+        if (endSessionUri != null) {
+            builder.providerConfigurationMetadata(Map.of("end_session_endpoint", endSessionUri));
+        }
+
+        return builder;
+    }
+
+    /**
+     * Lets the app reuse the login's access token for its own calls to the provider and
+     * refresh it when it expires. oauth2Login never refreshes on its own, and Keycloak's
+     * access tokens expire after an hour, so token lookups would fail mid-session.
      */
     @Bean
     OAuth2AuthorizedClientManager authorizedClientManager(
@@ -98,6 +156,7 @@ public class OidcAuthenticatorConfig implements ConsoleAuthenticator {
                 .authorizationCode()
                 .refreshToken()
                 .build());
+
         return manager;
     }
 }

@@ -7,10 +7,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 // the picture. Together with BackEndApplicationTests this is the guard against an OIDC-only
 // bean creeping back into the shared configuration.
 @SpringBootTest(properties = {
-        "console.security.auth.type=IN_MEMORY",
-        "console.security.auth.in-memory.users[0].username=admin",
-        "console.security.auth.in-memory.users[0].password={noop}secret",
-        "console.security.auth.in-memory.users[0].roles=gateway-admin"
+        "application.security.console.authentication.type=IN_MEMORY",
+        "application.security.console.authentication.in-memory.users[0].username=admin",
+        "application.security.console.authentication.in-memory.users[0].password={noop}secret",
+        "application.security.console.authentication.in-memory.users[0].roles=gateway-admin"
 })
 class BackEndApplicationInMemoryAuthTests {
 

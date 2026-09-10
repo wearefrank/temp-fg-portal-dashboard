@@ -7,6 +7,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
@@ -18,6 +20,9 @@ import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.stereotype.Service;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import wearefrank.backend.config.security.ConsoleAuthenticator;
+import wearefrank.backend.config.security.OAuth2Properties;
+import wearefrank.backend.config.security.OidcAuthenticatorConfig;
 
 import java.io.IOException;
 import java.net.URI;
@@ -54,8 +59,6 @@ public class GitIdentityService {
 
     private static final Logger log = LoggerFactory.getLogger(GitIdentityService.class);
 
-    private static final String REGISTRATION_ID = "keycloak";
-    private static final String OIDC_AUTH_TYPE = "OIDC";
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
     private final HttpClient httpClient;
@@ -65,25 +68,60 @@ public class GitIdentityService {
     private final String clientId;
     private final Set<String> brokeredProviders;
 
+    /**
+     * Brokering needs an identity provider to broker through, so both the manager and the
+     * OAuth2 settings are optional: under IN_MEMORY neither bean exists, and isAvailable()
+     * then reports the feature off, as it does for a realm that brokers nothing.
+     */
+    @Autowired
     public GitIdentityService(
             @Qualifier("keycloakHttpClient") HttpClient httpClient,
             ObjectMapper objectMapper,
-            OAuth2AuthorizedClientManager authorizedClientManager,
-            @Value("${console.security.auth.type:}") String authType,
-            @Value("${console.security.auth.oidc.issuer-uri:}") String issuerUri,
-            @Value("${console.security.auth.oidc.client-id:}") String clientId,
+            ObjectProvider<OAuth2AuthorizedClientManager> authorizedClientManager,
+            ObjectProvider<ConsoleAuthenticator> authenticator,
+            ObjectProvider<OAuth2Properties> oauth2Properties,
             @Value("${git.broker.providers:github,gitlab}") String brokeredProviders) {
+
+        this(httpClient, objectMapper, authorizedClientManager.getIfAvailable(),
+                brokerSettings(authenticator, oauth2Properties), brokeredProviders);
+    }
+
+    GitIdentityService(
+            HttpClient httpClient,
+            ObjectMapper objectMapper,
+            OAuth2AuthorizedClientManager authorizedClientManager,
+            BrokerSettings settings,
+            String brokeredProviders) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.authorizedClientManager = authorizedClientManager;
-        // Brokering needs an identity provider to broker through. The OIDC settings are
-        // readable whatever the active authenticator, so blank them out when it is not the
-        // one in use - isAvailable() then reports the feature off, as it does for a realm
-        // that brokers nothing.
-        boolean brokering = OIDC_AUTH_TYPE.equals(authType);
-        this.issuerUri = brokering ? trimTrailingSlash(issuerUri) : "";
-        this.clientId = brokering ? clientId : "";
+        this.issuerUri = settings.issuerUri();
+        this.clientId = settings.clientId();
         this.brokeredProviders = parseProviders(brokeredProviders);
+    }
+
+    /** What brokering needs from the provider, blank in a deployment that does not broker. */
+    record BrokerSettings(String issuerUri, String clientId) {
+
+        static final BrokerSettings NONE = new BrokerSettings("", "");
+
+        BrokerSettings {
+            issuerUri = issuerUri == null ? "" : issuerUri;
+            clientId = clientId == null ? "" : clientId;
+        }
+    }
+
+    /** Asking the active authenticator, rather than re-reading the type property it was chosen by. */
+    private static BrokerSettings brokerSettings(
+            ObjectProvider<ConsoleAuthenticator> authenticator, ObjectProvider<OAuth2Properties> oauth2Properties) {
+
+        ConsoleAuthenticator active = authenticator.getIfAvailable();
+        if (active == null || !active.brokersGitTokens()) return BrokerSettings.NONE;
+
+        OAuth2Properties properties = oauth2Properties.getIfAvailable();
+        return properties == null
+                ? BrokerSettings.NONE
+                : new BrokerSettings(properties.issuerUri(), properties.clientId());
     }
 
     /** Aliases this deployment brokers, in the order the UI should show them. */
@@ -264,13 +302,15 @@ public class GitIdentityService {
      * the realm's default lifespan is an hour, well under a working session.
      */
     private Optional<String> keycloakAccessToken() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        Authentication authentication = currentAuthentication();
         ServletRequestAttributes attributes = currentRequest();
-        if (authentication == null || attributes == null) return Optional.empty();
+        if (authentication == null || attributes == null || authorizedClientManager == null) {
+            return Optional.empty();
+        }
 
         try {
             OAuth2AuthorizeRequest request = OAuth2AuthorizeRequest
-                    .withClientRegistrationId(REGISTRATION_ID)
+                    .withClientRegistrationId(OidcAuthenticatorConfig.REGISTRATION_ID)
                     .principal(authentication)
                     .attribute(HttpServletRequest.class.getName(), attributes.getRequest())
                     .attribute(HttpServletResponse.class.getName(), attributes.getResponse())
@@ -287,7 +327,7 @@ public class GitIdentityService {
 
     /** Keycloak emits session_state; newer versions prefer sid, and some realms send both. */
     private Optional<String> sessionState() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        Authentication authentication = currentAuthentication();
         if (authentication == null || !(authentication.getPrincipal() instanceof OidcUser user)) {
             return Optional.empty();
         }
@@ -302,15 +342,15 @@ public class GitIdentityService {
                 : null;
     }
 
+    private static Authentication currentAuthentication() {
+        return SecurityContextHolder.getContext().getAuthentication();
+    }
+
     private static Set<String> parseProviders(String configured) {
         return Arrays.stream(configured.split(","))
                 .map(String::trim)
                 .filter(alias -> !alias.isEmpty())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-    }
-
-    private static String trimTrailingSlash(String uri) {
-        return uri.endsWith("/") ? uri.substring(0, uri.length() - 1) : uri;
     }
 
     private static String encode(String value) {

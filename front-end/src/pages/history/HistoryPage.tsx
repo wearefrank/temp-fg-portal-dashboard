@@ -99,12 +99,20 @@ export const HistoryPage: React.FC = () => {
     // Active named file selection for the main history panel
     const [activeProfileIndex, setActiveProfileIndex] = useState(0);
 
+    // Gates the first version fetch: getProviderHeaders() can only drop a stale browser
+    // token once fetchGitIdentities() has said which providers are linked.
+    const [identitiesLoaded, setIdentitiesLoaded] = useState(false);
+
     const activeProfiles = getActiveProfiles(provider, githubSettings, gitlabSettings, giteaSettings);
     const activeProfile = activeProfiles[activeProfileIndex];
     const activeFilePath = activeProfile?.filePath ?? '';
     const activeFileExists = activeFilePath ? fileExistsMap.get(activeFilePath) : undefined;
 
-    const { versions, error, saveVersion, fetchVersionContent, loadFileContent, clearCache, refetch } = useVersionHistory(activeFilePath);
+    // useVersionHistory treats '' as "nothing to fetch yet", which is what the gate needs.
+    const gatedFilePath = identitiesLoaded ? activeFilePath : '';
+
+    const { versions, error, saveVersion, fetchVersionContent, loadFileContent, clearCache, refetch } =
+        useVersionHistory(gatedFilePath);
     const versionList = versions ?? [];
 
     // Settings panel
@@ -193,18 +201,25 @@ export const HistoryPage: React.FC = () => {
         checkAllProfiles(lockedProvider, github, gitlab, gitea);
     };
 
-    useEffect(() => {
-        applyGitLock();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
     // --- Keycloak account links ---
 
     const refreshIdentities = () => fetchGitIdentities().then(setIdentities);
 
-    // Runs before the first version fetch so a linked provider never sends a stale token.
+    /**
+     * Identities first, then the lock, then open the gate: nothing may ask the backend
+     * about a repo before fetchGitIdentities() has said which providers are linked.
+     */
+    const bootstrap = async () => {
+        try {
+            await refreshIdentities();
+            await applyGitLock();
+        } finally {
+            setIdentitiesLoaded(true);
+        }
+    };
+
     useEffect(() => {
-        refreshIdentities();
+        bootstrap();
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 

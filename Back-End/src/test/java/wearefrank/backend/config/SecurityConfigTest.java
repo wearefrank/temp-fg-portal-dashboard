@@ -15,8 +15,8 @@ import static org.mockito.Mockito.mock;
 class SecurityConfigTest {
 
     /**
-     * An unset or misspelled console.security.auth.type leaves no authenticator. Starting
-     * anyway would mean serving the whole console unauthenticated, so this must fail loudly.
+     * An unset or misspelled authentication type leaves no authenticator. Starting anyway
+     * would mean serving the whole console unauthenticated, so this must fail loudly.
      */
     @Test
     @SuppressWarnings("unchecked")
@@ -26,8 +26,8 @@ class SecurityConfigTest {
         // Throws before touching HttpSecurity, so there is nothing to pass for it.
         assertThatThrownBy(() -> new SecurityConfig().filterChain(null, none))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("console.security.auth.type")
-                .hasMessageContaining("OIDC")
+                .hasMessageContaining("application.security.console.authentication.type")
+                .hasMessageContaining("OAUTH2")
                 .hasMessageContaining("IN_MEMORY");
     }
 }

@@ -1,7 +1,7 @@
 import { client } from './client';
 
-/** Matches the backend's ConsoleAuthenticator implementations. */
-export type AuthType = 'OIDC' | 'IN_MEMORY';
+/** The values ConsoleAuthenticator.type() returns; OAUTH2 is the OpenID Connect one. */
+export type AuthType = 'OAUTH2' | 'IN_MEMORY';
 
 export interface AuthMode {
     type: AuthType;

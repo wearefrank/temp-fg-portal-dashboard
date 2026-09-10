@@ -3,6 +3,7 @@ package wearefrank.backend.controller;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -11,7 +12,6 @@ import org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser;
 import wearefrank.backend.dto.UserDto;
 
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -23,17 +23,25 @@ class UserControllerTest {
 
     private final UserController controller = new UserController();
 
+    /**
+     * The name and groups come from the claims, but the roles arrive as authorities:
+     * RoleClaimOidcUserService has already mapped the configured claim by the time a
+     * request reaches a controller, so this mirrors what a real login produces.
+     */
     @Test
-    void readsAnOidcUserFromItsClaims() {
+    void readsAnOidcUserFromItsClaimsAndAuthorities() {
         OidcIdToken idToken = OidcIdToken.withTokenValue("token")
                 .claim("sub", "9f1c")
                 .claim("preferred_username", "alice")
-                .claim("realm_access", Map.of("roles",
-                        List.of("gateway-admin", "offline_access", "default-roles-frank")))
                 .claim("groups", List.of("/platform-team"))
                 .build();
+        List<GrantedAuthority> authorities = List.of(
+                new SimpleGrantedAuthority("ROLE_gateway-admin"),
+                new SimpleGrantedAuthority("ROLE_offline_access"),
+                new SimpleGrantedAuthority("ROLE_default-roles-frank"),
+                new SimpleGrantedAuthority("SCOPE_openid"));
         Authentication authentication = new TestingAuthenticationToken(
-                new DefaultOidcUser(List.of(new SimpleGrantedAuthority("ROLE_USER")), idToken), "n/a");
+                new DefaultOidcUser(authorities, idToken, "preferred_username"), "n/a", authorities);
 
         UserDto user = controller.getCurrentUser(authentication);
 

@@ -10,7 +10,6 @@ import org.springframework.web.bind.annotation.RestController;
 import wearefrank.backend.dto.UserDto;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -35,11 +34,14 @@ public class UserController {
             return new UserDto(null, List.of(), List.of());
         }
 
-        // Groups need a claim only an identity provider supplies, so they stay OIDC-only.
+        // Roles come from the authorities either way: under OAUTH2 the configured claim is
+        // mapped into them at login by RoleClaimOidcUserService. Only the display name and
+        // groups still need the claims, and groups need one only an identity provider sends.
+        List<String> roles = grantedRoles(authentication);
         if (authentication.getPrincipal() instanceof OidcUser user) {
-            return new UserDto(displayName(user), realmRoles(user), groups(user));
+            return new UserDto(displayName(user), roles, groups(user));
         }
-        return new UserDto(authentication.getName(), grantedRoles(authentication), List.of());
+        return new UserDto(authentication.getName(), roles, List.of());
     }
 
     private String displayName(OidcUser user) {
@@ -48,22 +50,10 @@ public class UserController {
         return user.getEmail() != null ? user.getEmail() : user.getSubject();
     }
 
-    /** Keycloak realm roles live in the realm_access claim, not in Spring's authorities. */
-    @SuppressWarnings("unchecked")
-    private List<String> realmRoles(OidcUser user) {
-        Object realmAccess = user.getClaims().get("realm_access");
-        if (!(realmAccess instanceof Map<?, ?> map)) return List.of();
-
-        Object roles = map.get("roles");
-        if (!(roles instanceof List<?> list)) return List.of();
-
-        return withoutNoise(((List<Object>) list).stream().map(String::valueOf));
-    }
-
     /**
-     * Everywhere else the roles are plain authorities. Only the ROLE_-prefixed ones are
-     * roles: Spring mixes in others that are not, such as the FACTOR_ authorities it adds
-     * to record how the user proved who they are.
+     * Only the ROLE_-prefixed authorities are roles: Spring mixes in others that are not,
+     * such as the SCOPE_ ones from the token and the FACTOR_ authorities it adds to record
+     * how the user proved who they are.
      */
     private List<String> grantedRoles(Authentication authentication) {
         return withoutNoise(authentication.getAuthorities().stream()

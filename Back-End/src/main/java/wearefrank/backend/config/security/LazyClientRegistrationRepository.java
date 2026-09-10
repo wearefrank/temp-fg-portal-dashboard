@@ -8,16 +8,11 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import java.util.function.Supplier;
 
 /**
- * Resolves the OIDC registration on first use instead of at startup.
+ * Resolves the OIDC registration on first login instead of at startup, so a provider that
+ * is down only fails that login instead of the whole application. The next login retries.
  *
- * Spring's usual issuer-uri handling fetches the discovery document while the context is
- * building, so a provider that is down takes the whole application with it - in Kubernetes
- * that is a crashloop. Here it costs only the login that triggered the lookup, and the
- * next attempt retries, so the console recovers on its own once the provider is back.
- *
- * Deliberately not Iterable: enumerating registrations is what Spring's generated login
- * page does, and that would put discovery back on the startup path. The console serves its
- * own login page, so nothing needs the listing.
+ * Not Iterable on purpose: listing registrations would trigger discovery at startup again,
+ * and only Spring's generated login page needs that listing.
  */
 public class LazyClientRegistrationRepository implements ClientRegistrationRepository {
 
@@ -41,7 +36,7 @@ public class LazyClientRegistrationRepository implements ClientRegistrationRepos
         if (resolved != null) return resolved;
 
         synchronized (this) {
-            // A failure propagates and leaves cached null on purpose, so the next call retries.
+            // On failure cached stays null on purpose, so the next call retries.
             if (cached == null) {
                 cached = loader.get();
                 log.info("Resolved OIDC client registration '{}'", registrationId);
