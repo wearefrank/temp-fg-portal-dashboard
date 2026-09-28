@@ -10,6 +10,7 @@ import wearefrank.backend.dto.LogFieldDto;
 import wearefrank.backend.dto.LogFieldType;
 import wearefrank.backend.dto.MessageVolumeDto;
 import wearefrank.backend.service.LogsService;
+import wearefrank.backend.service.LokiScope;
 
 import java.util.List;
 
@@ -28,6 +29,9 @@ class LogsControllerTest {
 
     @MockitoBean
     LogsService logsService;
+
+    @MockitoBean
+    LokiScope lokiScope;
 
     private static final LogEntryDto AUDIT_ENTRY = new LogEntryDto(
             "audit", "gem-a", "2023-11-14T22:13:20Z", "1700000000000000000", "INFO", "centric", "12",
