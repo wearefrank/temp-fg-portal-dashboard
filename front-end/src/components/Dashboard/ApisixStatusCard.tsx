@@ -11,6 +11,8 @@ const STATUS_TEXT: Record<ConnectionStatus, string> = {
 interface ApisixStatusCardProps {
     status: ConnectionStatus;
     config: ConnectionConfig | null;
+    /** LOKI_ENABLED on the backend; off means the log panels are not on the page at all. */
+    lokiEnabled: boolean;
     /** First load; a refresh keeps the verdict Loki last gave. */
     lokiChecking: boolean;
     lokiFailed: boolean;
@@ -19,10 +21,11 @@ interface ApisixStatusCardProps {
 export const ApisixStatusCard = ({
     status,
     config,
+    lokiEnabled,
     lokiChecking,
     lokiFailed,
 }: ApisixStatusCardProps) => {
-    const loki = lokiState(lokiChecking, lokiFailed);
+    const loki = lokiState(lokiEnabled, lokiChecking, lokiFailed);
 
     return (
         <div className="card">
@@ -44,7 +47,13 @@ export const ApisixStatusCard = ({
     );
 };
 
-function lokiState(checking: boolean, failed: boolean): { text: string; tone: string } {
+interface LokiState {
+    text: string;
+    tone: string;
+}
+
+function lokiState(enabled: boolean, checking: boolean, failed: boolean): LokiState {
+    if (!enabled) return { text: 'Disabled', tone: '' };
     if (checking) return { text: 'Checking', tone: '' };
     if (failed) return { text: 'Inactive', tone: 'text-error' };
     return { text: 'Active', tone: 'text-success' };

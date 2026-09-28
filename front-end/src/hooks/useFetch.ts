@@ -19,6 +19,11 @@ export function useFetch<T>(endpoint: string, refreshKey?: number): FetchState<T
 
     const fetchData = useCallback(async () => {
         controllerRef.current?.abort();
+        // An empty endpoint means "do not fetch", so a caller can switch a panel off.
+        if (!endpoint) {
+            setLoading(false);
+            return;
+        }
         const controller = new AbortController();
         controllerRef.current = controller;
         setLoading(true);

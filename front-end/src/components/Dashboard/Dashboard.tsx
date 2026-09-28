@@ -26,12 +26,24 @@ const LOG_KIND: LogKinds = ['messages', 'audit'];
 
 export const Dashboard = () => {
     const refreshKey = useDashboardRefresh();
+    // Null while the flag is still loading, which the panels treat as off and the status
+    // card as still checking.
+    // A failed call counts as on, for an older backend without the endpoint.
+    const lokiEnabledFetch = useFetch<boolean>('/logs/enabled');
+    const lokiFlag = lokiEnabledFetch.error ? true : lokiEnabledFetch.data;
+    const lokiOn = lokiFlag === true;
 
     const configFetch = useFetch<ConnectionConfig>('/config', refreshKey);
     const routesFetch = useFetch<LiveRoute[]>('/metrics/routes', refreshKey);
     const upstreamsFetch = useFetch<LiveUpstream[]>('/metrics/upstreams', refreshKey);
     const servicesFetch = useFetch<LiveService[]>('/metrics/services', refreshKey);
-    const lokiHealthFetch = useFetch<unknown[]>('/logs/recent?limit=1&startTime=0', refreshKey);
+    // Empty endpoint means no fetch, so the health probe stays off while Loki is.
+    const lokiHealthEndpoint = lokiOn ? '/logs/recent?limit=1&startTime=0' : '';
+    const lokiHealthFetch = useFetch<unknown[]>(lokiHealthEndpoint, refreshKey);
+
+    // The flag and the first probe are both "no verdict yet", so the card gets them as one.
+    const lokiProbing = lokiHealthFetch.loading && lokiHealthFetch.data == null && !lokiHealthFetch.error;
+    const lokiChecking = lokiFlag === null || lokiProbing;
 
     const controlStatus = useControlStatus(configFetch.data != null);
 
@@ -54,12 +66,15 @@ export const Dashboard = () => {
             </h1>
 
             <div className={styles.grid}>
-                <MessagesCounter title="Messages Handled" kind={LOG_KIND} refreshKey={refreshKey} />
+                {lokiOn && (
+                    <MessagesCounter title="Messages Handled" kind={LOG_KIND} refreshKey={refreshKey} />
+                )}
 
                 <ApisixStatusCard
                     status={controlStatus}
                     config={configFetch.data}
-                    lokiChecking={lokiHealthFetch.loading && lokiHealthFetch.data == null && !lokiHealthFetch.error}
+                    lokiEnabled={lokiFlag !== false}
+                    lokiChecking={lokiChecking}
                     lokiFailed={lokiHealthFetch.error != null}
                 />
 
@@ -84,24 +99,28 @@ export const Dashboard = () => {
                     renderItem={service => <LiveServiceItem key={service.key} service={service} />}
                 />
 
-                <RouteStatsTable
-                    title="Traffic per Route"
-                    kind={LOG_KIND}
-                    selectedRoute={selectedRoute}
-                    onSelectRoute={setSelectedRoute}
-                    appliedLogFilter={logFilter}
-                    onApplyRangeToLogs={applyRangeToLogs}
-                    refreshKey={refreshKey}
-                />
+                {lokiOn && (
+                    <>
+                        <RouteStatsTable
+                            title="Traffic per Route"
+                            kind={LOG_KIND}
+                            selectedRoute={selectedRoute}
+                            onSelectRoute={setSelectedRoute}
+                            appliedLogFilter={logFilter}
+                            onApplyRangeToLogs={applyRangeToLogs}
+                            refreshKey={refreshKey}
+                        />
 
-                <LokiLogTable
-                    title="Messages Log"
-                    kind={LOG_KIND}
-                    defaultPageSize={25}
-                    search={logFilter?.route?.routeId ?? ''}
-                    range={logFilter?.range}
-                    refreshKey={refreshKey}
-                />
+                        <LokiLogTable
+                            title="Messages Log"
+                            kind={LOG_KIND}
+                            defaultPageSize={25}
+                            search={logFilter?.route?.routeId ?? ''}
+                            range={logFilter?.range}
+                            refreshKey={refreshKey}
+                        />
+                    </>
+                )}
             </div>
         </div>
     );

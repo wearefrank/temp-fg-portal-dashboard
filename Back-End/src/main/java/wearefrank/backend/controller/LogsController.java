@@ -1,5 +1,6 @@
 package wearefrank.backend.controller;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 import wearefrank.backend.dto.LogCountDto;
 import wearefrank.backend.dto.LogEntryDto;
@@ -8,6 +9,7 @@ import wearefrank.backend.dto.LogKind;
 import wearefrank.backend.dto.LogPageDto;
 import wearefrank.backend.dto.MessageVolumeDto;
 import wearefrank.backend.service.LogsService;
+import wearefrank.backend.service.LokiScope;
 
 import java.util.List;
 
@@ -26,9 +28,34 @@ import java.util.List;
 public class LogsController {
 
     private final LogsService logsService;
+    private final LokiScope scope;
+    // False for a deployment with no Loki behind it. The endpoints below keep working;
+    // it only tells the dashboard not to ask.
+    private final boolean lokiEnabled;
 
-    public LogsController(LogsService logsService) {
+    public LogsController(
+            LogsService logsService,
+            LokiScope scope,
+            @Value("${LOKI_ENABLED:true}") boolean lokiEnabled) {
         this.logsService = logsService;
+        this.scope = scope;
+        this.lokiEnabled = lokiEnabled;
+    }
+
+    /** Whether this deployment has a Loki. The dashboard checks before it queries. */
+    @GetMapping("/enabled")
+    public boolean isEnabled() {
+        return lokiEnabled;
+    }
+
+    /**
+     * The namespaces LOKI_NAMESPACE scopes this console to. The log table's filter is built
+     * from these, so a namespace that is quiet right now still gets a button. Empty means
+     * unpinned, and the table falls back to the namespaces it sees on the rows.
+     */
+    @GetMapping("/namespaces")
+    public List<String> getNamespaces() {
+        return scope.namespaces();
     }
 
     /**

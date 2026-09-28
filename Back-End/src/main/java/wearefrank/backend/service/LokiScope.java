@@ -60,6 +60,16 @@ public class LokiScope {
         return retentionSeconds;
     }
 
+    /**
+     * The namespaces LOKI_NAMESPACE pins to, in the order given. Empty means unpinned.
+     *
+     * Read by the dashboard so its namespace filter lists what the console is configured for
+     * rather than what happens to be on the page it is showing.
+     */
+    public List<String> namespaces() {
+        return namespaces;
+    }
+
     /** The label a stream carries its namespace under, for reading it back off a response. */
     public String namespaceLabel() {
         return namespaceLabel;

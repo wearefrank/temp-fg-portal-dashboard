@@ -53,20 +53,23 @@ export function describeOrder(sortId: string, sortDesc: boolean, columnLabel: st
 export function logSubtitle(input: LogSubtitleInput): string {
     // First, because the table is gated on the descriptors - an empty card saying "no lines"
     // would blame Loki for a column problem.
-    if (input.fieldsFailed) return 'Columns unavailable — cannot draw the table';
+    if (input.fieldsFailed) return 'Columns unavailable - cannot draw the table';
     if (input.loading && !input.hasData) return 'Loading…';
     if (input.failed) return 'Loki unavailable';
-    if (input.totalCount === 0 && input.search) {
-        return `No lines match "${input.search}"${describeScope(input)} in this window`;
+
+    if (input.totalCount === 0) {
+        if (input.search) {
+            return `No lines match "${input.search}"${describeScope(input)} in this window`;
+        }
+        return emptyHint(input.kinds);
     }
-    if (input.totalCount === 0) return emptyHint(input.kinds);
 
     const first = (input.page - 1) * input.pageSize + 1;
     const last = first + input.rowsOnPage - 1;
     const filter = input.search ? ` matching "${input.search}"${describeScope(input)}` : '';
 
     return `${first.toLocaleString()}–${last.toLocaleString()} of ${input.totalCount.toLocaleString()}`
-        + ` lines${filter} in ${describeRange(input.range)} · ${input.order}${namespaceNote(input)}`;
+        + ` lines${filter} in ${describeRange(input.range)} - ${input.order}${namespaceNote(input)}`;
 }
 
 /** Which column the term was looked for in, when it was not the whole line. */
@@ -80,5 +83,6 @@ function describeScope(input: LogSubtitleInput): string {
  */
 function namespaceNote(input: LogSubtitleInput): string {
     if (input.namespace === ALL_NAMESPACES) return '';
+
     return ` · showing the ${input.namespaceCount.toLocaleString()} from ${input.namespace}`;
 }
