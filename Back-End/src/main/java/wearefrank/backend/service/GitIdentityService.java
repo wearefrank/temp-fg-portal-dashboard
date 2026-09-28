@@ -80,7 +80,7 @@ public class GitIdentityService {
             ObjectProvider<OAuth2AuthorizedClientManager> authorizedClientManager,
             ObjectProvider<ConsoleAuthenticator> authenticator,
             ObjectProvider<OAuth2Properties> oauth2Properties,
-            @Value("${git.broker.providers:github,gitlab}") String brokeredProviders) {
+            @Value("${git.broker.providers:}") String brokeredProviders) {
 
         this(httpClient, objectMapper, authorizedClientManager.getIfAvailable(),
                 brokerSettings(authenticator, oauth2Properties), brokeredProviders);
@@ -132,7 +132,7 @@ public class GitIdentityService {
     /**
      * Whether linking is even possible here. The realm's identity providers cannot be
      * discovered over a public endpoint, so which aliases exist is a deployment setting
-     * (git.broker.providers) rather than something we probe for.
+     * (git.broker.providers) rather than something we probe for. Off unless configured.
      */
     public boolean isAvailable(String alias) {
         return !issuerUri.isBlank() && brokeredProviders.contains(alias);
